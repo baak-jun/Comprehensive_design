@@ -1,0 +1,27 @@
+LLMmodels/
+
+# Android/Kotlin frontend local files and build outputs
+Frontend/.gradle/
+Frontend/.kotlin/
+Frontend/**/build/
+Frontend/**/.externalNativeBuild/
+Frontend/**/.cxx/
+Frontend/local.properties
+Frontend/**/local.properties
+Frontend/**/captures/
+Frontend/**/*.apk
+Frontend/**/*.ap_
+Frontend/**/*.aab
+Frontend/**/*.jks
+Frontend/**/*.keystore
+Frontend/**/keystore.properties
+Frontend/**/.env
+Frontend/**/.env.*
+Frontend/**/google-services.json
+Frontend/**/secrets.properties
+Frontend/.idea/caches/
+Frontend/.idea/libraries/
+Frontend/.idea/modules.xml
+Frontend/.idea/workspace.xml
+Frontend/.idea/navEditor.xml
+Frontend/.idea/assetWizardSettings.xml
