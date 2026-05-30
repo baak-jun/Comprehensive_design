@@ -14,8 +14,8 @@ Current handoff as of 2026-05-30:
 
 - Latest completed progress note: `docs/2026-05-29-progress.md`
 - Current in-progress note: `docs/2026-05-30-progress.md`
-- Current app version: `0.4.15`
-- Current dated APK name: `app/build/outputs/apk/debug/Counseling_05_30_v0.4.15_debug.apk`
+- Current app version: `1.0.0`
+- Current dated APK name: `app/build/outputs/apk/debug/Counseling_05_30_v1.0.0_debug.apk`
 - Main next step: build verification and real-device testing for model load, text counseling, immediate WAV recording input, Android speech recognition text input, session restore/switching, important memory save/delete, RAG-lite related-context injection, and Health Connect prompt injection.
 - Secondary next steps: persist Health Connect prompt settings if desired, add session rename/delete, improve important memory UI, improve RAG-lite ranking, and consider splitting `MainActivity.kt`.
 
