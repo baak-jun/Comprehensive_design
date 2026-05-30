@@ -10,13 +10,14 @@ This project uses daily progress notes and date-stamped debug APK names. At the 
 6. If behavior changes, update `versionName` according to the scope of the change. If only docs or notes change, keep the app version.
 7. Before continuing feature work, scan the latest note's "next work" section and verify whether the existing code already covers any item.
 
-Current handoff as of 2026-05-29:
+Current handoff as of 2026-05-30:
 
-- Latest completed progress note: `docs/2026-05-28-progress.md`
-- Current app version: `0.4.1`
-- Last generated dated APK: `app/build/outputs/apk/debug/Counseling_05_28_v0.4.1_debug.apk`
-- Main next step: real-device testing for model load, image/audio attachments, Android speech recognition text input, session restore, important memory save/delete, and RAG-lite related-context injection.
-- Secondary next steps: refine Health Connect prompt injection, multi-session management, important memory UI improvements, RAG-lite ranking, and date/version naming hygiene.
+- Latest completed progress note: `docs/2026-05-29-progress.md`
+- Current in-progress note: `docs/2026-05-30-progress.md`
+- Current app version: `0.4.12`
+- Current dated APK name: `app/build/outputs/apk/debug/Counseling_05_30_v0.4.12_debug.apk`
+- Main next step: build verification and real-device testing for model load, text counseling, immediate WAV recording input, Android speech recognition text input, session restore/switching, important memory save/delete, RAG-lite related-context injection, and Health Connect prompt injection.
+- Secondary next steps: persist Health Connect prompt settings if desired, add session rename/delete, improve important memory UI, improve RAG-lite ranking, and consider splitting `MainActivity.kt`.
 
 Build environment reminder:
 

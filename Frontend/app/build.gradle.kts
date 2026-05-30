@@ -13,38 +13,18 @@ android {
         minSdk = 28
         targetSdk = 36
         versionCode = 1
-        versionName = "0.4.9"
+        versionName = "0.4.12"
 
-        ndk {
-            abiFilters += listOf("arm64-v8a")
-        }
-
-        externalNativeBuild {
-            cmake {
-                cppFlags += listOf(
-                    "-std=c++17",
-                    "-O3",
-                    "-fexceptions",
-                    "-frtti",
-                    "-march=armv8.7-a"
-                )
-                arguments += listOf(
-                    "-DANDROID_PLATFORM=android-28",
-                    "-DGGML_OPENMP=OFF",
-                    "-DGGML_LLAMAFILE=OFF"
-                )
-            }
-        }
-    }
-
-    externalNativeBuild {
-        cmake {
-            path = file("src/main/cpp/CMakeLists.txt")
-        }
     }
 
     buildFeatures {
         compose = true
+    }
+
+    sourceSets {
+        getByName("main") {
+            java.srcDir("src/PhenoType")
+        }
     }
 
     compileOptions {
@@ -67,7 +47,7 @@ tasks.register("copyDatedDebugApk") {
         copy {
             from(layout.buildDirectory.file("outputs/apk/debug/app-debug.apk"))
             into(layout.buildDirectory.dir("outputs/apk/debug"))
-            rename { "Counseling_05_29_v0.4.9_debug.apk" }
+            rename { "Counseling_05_30_v0.4.12_debug.apk" }
         }
     }
 }

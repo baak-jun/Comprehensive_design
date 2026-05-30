@@ -142,6 +142,7 @@ class LiteRtLmCounselingEngine(
         val attachmentNotice = when {
             imagePath != null -> "\n\n[첨부 안내] 현재 상담 호출에서는 이미지 입력을 사용하지 않습니다. 사용자가 텍스트로 설명한 내용만 근거로 답하세요."
             audioPath != null && !directAttachmentMode -> "\n\n[첨부 안전 모드] 음성 파일이 첨부되었지만, 오디오 직접 분석이 꺼져 있어 파일을 직접 모델에 넘기지 않았습니다. 사용자가 텍스트로 설명한 내용만 근거로 답하세요."
+            audioPath != null -> "\n\n[음성 입력 안내] 이 메시지에는 사용자가 직접 말한 음성 녹음이 첨부되어 있습니다. 첨부된 오디오를 사용자 발화로 간주하고, 들은 내용에 근거해 답하세요. 잘 들리지 않거나 확실하지 않으면 추측하지 말고 확인 질문을 하세요."
             else -> ""
         }
         val safeContent = content + attachmentNotice
