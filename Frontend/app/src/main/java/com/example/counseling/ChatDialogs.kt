@@ -3,6 +3,7 @@ package com.example.counseling
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -183,6 +184,9 @@ fun ChatSettingsDialog(
     onImportSession: () -> Unit,
     onDismiss: () -> Unit,
 ) {
+    var conversationOpen by remember { mutableStateOf(false) }
+    var responseOpen by remember { mutableStateOf(true) }
+
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("설정") },
@@ -194,7 +198,7 @@ fun ChatSettingsDialog(
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
                 item {
-                    Text("모델", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                    SettingsPlainSectionTitle("모델")
                 }
                 item {
                     Text(
@@ -204,87 +208,80 @@ fun ChatSettingsDialog(
                     )
                 }
                 item {
-                    OutlinedButton(onClick = onLoadModel, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(8.dp)) {
+                    Button(onClick = onLoadModel, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(8.dp)) {
                         Text("모델 파일 선택")
                     }
                 }
 
-                item {
-                    Text("대화", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
-                }
-                item {
+                item { SettingsSectionHeader("대화 관리", conversationOpen) { conversationOpen = !conversationOpen } }
+                if (conversationOpen) item {
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OutlinedButton(onClick = onShowSystemPrompt, modifier = Modifier.weight(1f), shape = RoundedCornerShape(8.dp)) {
+                        SettingsActionButton(onClick = onShowSystemPrompt, modifier = Modifier.weight(1f)) {
                             Text("말투/프롬프트")
                         }
-                        OutlinedButton(onClick = onShowMemories, modifier = Modifier.weight(1f), shape = RoundedCornerShape(8.dp)) {
+                        SettingsActionButton(onClick = onShowMemories, modifier = Modifier.weight(1f)) {
                             Text("기억")
                         }
                     }
                 }
-                item {
+                if (conversationOpen) item {
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OutlinedButton(onClick = onNewSession, modifier = Modifier.weight(1f), shape = RoundedCornerShape(8.dp)) {
+                        SettingsActionButton(onClick = onNewSession, modifier = Modifier.weight(1f)) {
                             Text("새 세션")
                         }
-                        OutlinedButton(onClick = onShowSessions, modifier = Modifier.weight(1f), shape = RoundedCornerShape(8.dp)) {
+                        SettingsActionButton(onClick = onShowSessions, modifier = Modifier.weight(1f)) {
                             Text("세션 목록")
                         }
                     }
                 }
-                item {
+                if (conversationOpen) item {
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OutlinedButton(onClick = onExportSession, modifier = Modifier.weight(1f), shape = RoundedCornerShape(8.dp)) {
+                        SettingsActionButton(onClick = onExportSession, modifier = Modifier.weight(1f)) {
                             Text("내보내기")
                         }
-                        OutlinedButton(onClick = onImportSession, modifier = Modifier.weight(1f), shape = RoundedCornerShape(8.dp)) {
+                        SettingsActionButton(onClick = onImportSession, modifier = Modifier.weight(1f)) {
                             Text("불러오기")
                         }
                     }
                 }
 
-                item {
-                    Text("응답 옵션", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
-                }
-                item {
+                item { SettingsSectionHeader("응답 옵션", responseOpen) { responseOpen = !responseOpen } }
+                if (responseOpen) item {
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OutlinedButton(onClick = onToggleHealthContext, modifier = Modifier.weight(1f), shape = RoundedCornerShape(8.dp)) {
+                        SettingsActionButton(onClick = onToggleHealthContext, modifier = Modifier.weight(1f), selected = includeHealthContext) {
                             Text(if (includeHealthContext) "건강 포함" else "건강 제외")
                         }
-                        OutlinedButton(onClick = onTogglePhenotypeContext, modifier = Modifier.weight(1f), shape = RoundedCornerShape(8.dp)) {
+                        SettingsActionButton(onClick = onTogglePhenotypeContext, modifier = Modifier.weight(1f), selected = includePhenotypeContext) {
                             Text(if (includePhenotypeContext) "패턴 포함" else "패턴 제외")
                         }
                     }
                 }
-                item {
+                if (responseOpen) item {
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OutlinedButton(onClick = onCycleHealthPeriod, modifier = Modifier.weight(1f), shape = RoundedCornerShape(8.dp)) {
+                        SettingsActionButton(onClick = onCycleHealthPeriod, modifier = Modifier.weight(1f)) {
                             Text("기간 ${healthContextPeriod.label}")
                         }
-                        OutlinedButton(onClick = onCycleThinkingMode, modifier = Modifier.weight(1f), shape = RoundedCornerShape(8.dp)) {
+                        SettingsActionButton(onClick = onCycleThinkingMode, modifier = Modifier.weight(1f)) {
                             Text("사고 ${thinkingMode.label}")
                         }
                     }
                 }
-                item {
-                    OutlinedButton(onClick = onToggleDirectAttachmentMode, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(8.dp)) {
+                if (responseOpen) item {
+                    SettingsActionButton(onClick = onToggleDirectAttachmentMode, modifier = Modifier.fillMaxWidth(), selected = directAttachmentMode) {
                         Text(if (directAttachmentMode) "오디오 직접 분석 켜짐" else "오디오 안전 모드")
                     }
                 }
 
                 item {
-                    Text("글씨 크기", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                    SettingsPlainSectionTitle("표시")
                 }
                 item {
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         ChatFontSize.entries.forEach { size ->
-                            OutlinedButton(
+                            SettingsActionButton(
                                 onClick = { onChatFontSizeChange(size) },
                                 modifier = Modifier.weight(1f),
-                                shape = RoundedCornerShape(8.dp),
-                                colors = ButtonDefaults.outlinedButtonColors(
-                                    containerColor = if (size == chatFontSize) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surface,
-                                ),
+                                selected = size == chatFontSize,
                             ) {
                                 Text(size.label)
                             }
@@ -293,18 +290,15 @@ fun ChatSettingsDialog(
                 }
 
                 item {
-                    Text("테마", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                    SettingsPlainSectionTitle("테마")
                 }
                 item {
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         AppThemeMode.entries.forEach { mode ->
-                            OutlinedButton(
+                            SettingsActionButton(
                                 onClick = { onThemeModeChange(mode) },
                                 modifier = Modifier.weight(1f),
-                                shape = RoundedCornerShape(8.dp),
-                                colors = ButtonDefaults.outlinedButtonColors(
-                                    containerColor = if (mode == themeMode) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surface,
-                                ),
+                                selected = mode == themeMode,
                             ) {
                                 Text(mode.label)
                             }
@@ -318,6 +312,55 @@ fun ChatSettingsDialog(
                 Text("닫기")
             }
         },
+    )
+}
+
+@Composable
+private fun SettingsSectionHeader(title: String, open: Boolean, onClick: () -> Unit) {
+    Button(
+        onClick = onClick,
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(8.dp),
+        colors = ButtonDefaults.buttonColors(
+            containerColor = if (open) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
+            contentColor = if (open) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
+        ),
+    ) {
+        Text(
+            text = if (open) "$title 접기" else "$title 펼치기",
+            modifier = Modifier.weight(1f),
+            fontWeight = FontWeight.SemiBold,
+        )
+        Text(if (open) "▲" else "▼")
+    }
+}
+
+@Composable
+private fun SettingsPlainSectionTitle(title: String) {
+    Text(
+        text = title,
+        style = MaterialTheme.typography.titleSmall,
+        fontWeight = FontWeight.SemiBold,
+        color = MaterialTheme.colorScheme.primary,
+    )
+}
+
+@Composable
+private fun SettingsActionButton(
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    selected: Boolean = false,
+    content: @Composable RowScope.() -> Unit,
+) {
+    OutlinedButton(
+        onClick = onClick,
+        modifier = modifier,
+        shape = RoundedCornerShape(8.dp),
+        colors = ButtonDefaults.outlinedButtonColors(
+            containerColor = if (selected) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surface,
+            contentColor = if (selected) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurface,
+        ),
+        content = content,
     )
 }
 

@@ -19,6 +19,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -154,26 +155,30 @@ private fun CounselingApp(
                 .fillMaxSize()
                 .padding(innerPadding),
         ) {
+            ChatScreen(
+                themeMode = themeMode,
+                onThemeModeChange = onThemeModeChange,
+                chromeVisible = chatChromeVisible,
+                onChromeVisibleChange = { chatChromeVisible = it },
+                settingsOpenRequests = settingsOpenRequests,
+            )
             when (screen) {
-                AppScreen.Chat -> ChatScreen(
-                    themeMode = themeMode,
-                    onThemeModeChange = onThemeModeChange,
-                    chromeVisible = chatChromeVisible,
-                    onChromeVisibleChange = { chatChromeVisible = it },
-                    settingsOpenRequests = settingsOpenRequests,
-                )
-                AppScreen.Gallery -> GalleryScreen()
-                AppScreen.Health -> HealthScreen()
-                AppScreen.Phenotype -> PhenotypeScreen()
-                AppScreen.Settings -> ChatScreen(
-                    themeMode = themeMode,
-                    onThemeModeChange = onThemeModeChange,
-                    chromeVisible = chatChromeVisible,
-                    onChromeVisibleChange = { chatChromeVisible = it },
-                    settingsOpenRequests = settingsOpenRequests,
-                )
+                AppScreen.Chat, AppScreen.Settings -> Unit
+                AppScreen.Gallery -> ScreenOverlay { GalleryScreen() }
+                AppScreen.Health -> ScreenOverlay { HealthScreen() }
+                AppScreen.Phenotype -> ScreenOverlay { PhenotypeScreen() }
             }
         }
+    }
+}
+
+@Composable
+private fun ScreenOverlay(content: @Composable () -> Unit) {
+    Surface(
+        modifier = Modifier.fillMaxSize(),
+        color = MaterialTheme.colorScheme.background,
+    ) {
+        content()
     }
 }
 

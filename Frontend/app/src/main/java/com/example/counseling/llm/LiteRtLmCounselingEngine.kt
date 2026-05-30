@@ -102,7 +102,17 @@ class LiteRtLmCounselingEngine(
         }
 
         runCatching {
-            sendMessage(chat, lastUserMessage, includeInstruction = !hasSentInstructionPrompt, onPartial = onPartial)
+            val reply = sendMessage(
+                chat,
+                lastUserMessage,
+                includeInstruction = !hasSentInstructionPrompt,
+                onPartial = onPartial,
+            )
+            if (isSuspiciouslyShortReply(reply)) {
+                retryAfterShortReply(lastUserMessage, onPartial)
+            } else {
+                reply
+            }
         }.onSuccess {
             hasSentInstructionPrompt = true
         }.getOrElse { error ->
@@ -174,6 +184,45 @@ class LiteRtLmCounselingEngine(
             onPartial(latest)
         }
         return latest.ifBlank { chat.sendMessage(prompt).textContent() }
+    }
+
+    private suspend fun retryAfterShortReply(
+        message: ChatMessage,
+        onPartial: (String) -> Unit,
+    ): String {
+        val loadedEngine = engine ?: return ""
+        conversation?.close()
+        val retryConversation = createConversation(loadedEngine)
+        conversation = retryConversation
+        hasSentInstructionPrompt = false
+        onPartial("")
+        val retryMessage = message.copy(
+            content = """
+                ${message.content}
+
+                [Retry instruction]
+                The previous response ended too early. Answer in Korean with at least one complete sentence.
+                Briefly reflect the user's feeling or situation, then ask at most one useful follow-up question if needed.
+                Do not output XML tags, hidden reasoning, or a single-symbol answer.
+            """.trimIndent(),
+        )
+        return sendMessage(
+            retryConversation,
+            retryMessage,
+            includeInstruction = true,
+            onPartial = onPartial,
+        )
+    }
+
+    private fun isSuspiciouslyShortReply(text: String): Boolean {
+        val trimmed = text.trim()
+        if (trimmed.isEmpty()) return false
+        val withoutTags = trimmed
+            .replace(Regex("(?is)<think>.*?</think>"), "")
+            .replace(Regex("(?is)<thinking>.*?</thinking>"), "")
+            .replace(Regex("(?is)</?think(?:ing)?>"), "")
+            .trim()
+        return withoutTags.length <= 2 || withoutTags in setOf("<", ">", "...", ".", ",")
     }
 
     private fun buildGemmaInitialUserPrompt(instruction: String, userMessage: String): String {

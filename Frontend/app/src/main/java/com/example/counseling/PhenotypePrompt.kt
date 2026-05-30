@@ -63,7 +63,7 @@ private fun buildPhenotypePromptContext(
         """.trimIndent()
     }
     val usageBlock = appUsageSummary.takeIf { it.hasPermission }?.let {
-        val apps = it.topApps.take(12).joinToString(separator = "\n") { app ->
+        val apps = it.topApps.take(6).joinToString(separator = "\n") { app ->
             "- ${app.appName}: ${app.totalTimeMin}분 (${app.category.korean})"
         }.ifBlank { "- 표시할 앱별 사용 시간이 없습니다." }
         """

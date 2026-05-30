@@ -83,16 +83,22 @@ class AppUsageAnalyzer(private val context: Context) {
         ) ?: emptyList()
 
         // ── 앱별 총 사용 시간 집계 (이번 주) ─────────────────────────
-        val appTotalMs = mutableMapOf<String, Long>()
+        val eventUsageMs = calcForegroundUsageByPackage(usm, thisWeekStart, now)
+        val statUsageMs = mutableMapOf<String, Long>()
         thisWeekStats.forEach { stat ->
             if (stat.totalTimeInForeground > 0) {
-                appTotalMs[stat.packageName] =
-                    (appTotalMs[stat.packageName] ?: 0L) + stat.totalTimeInForeground
+                statUsageMs[stat.packageName] =
+                    (statUsageMs[stat.packageName] ?: 0L) + stat.totalTimeInForeground
             }
+        }
+        val appTotalMs = (eventUsageMs.keys + statUsageMs.keys).associateWith { pkg ->
+            maxOf(eventUsageMs[pkg] ?: 0L, statUsageMs[pkg] ?: 0L)
         }
 
         val thisWeekTotalMs = appTotalMs.values.sum()
-        val prevWeekTotalMs = prevWeekStats.sumOf { it.totalTimeInForeground }
+        val prevEventUsageMs = calcForegroundUsageByPackage(usm, prevWeekStart, thisWeekStart)
+        val prevStatTotalMs = prevWeekStats.sumOf { it.totalTimeInForeground }
+        val prevWeekTotalMs = maxOf(prevEventUsageMs.values.sum(), prevStatTotalMs)
 
         val weeklyChangePct = if (prevWeekTotalMs > 0) {
             ((thisWeekTotalMs - prevWeekTotalMs).toFloat() / prevWeekTotalMs) * 100f
@@ -190,6 +196,39 @@ class AppUsageAnalyzer(private val context: Context) {
         }
 
         return totalMs / 60_000
+    }
+
+    private fun calcForegroundUsageByPackage(usm: UsageStatsManager, from: Long, to: Long): Map<String, Long> {
+        val events = usm.queryEvents(from, to) ?: return emptyMap()
+        val totals = mutableMapOf<String, Long>()
+        val activeStarts = mutableMapOf<String, Long>()
+        val event = UsageEvents.Event()
+
+        while (events.hasNextEvent()) {
+            events.getNextEvent(event)
+            val packageName = event.packageName ?: continue
+            when (event.eventType) {
+                UsageEvents.Event.ACTIVITY_RESUMED,
+                UsageEvents.Event.MOVE_TO_FOREGROUND -> {
+                    activeStarts[packageName] = event.timeStamp
+                }
+                UsageEvents.Event.ACTIVITY_PAUSED,
+                UsageEvents.Event.MOVE_TO_BACKGROUND -> {
+                    val startedAt = activeStarts.remove(packageName)
+                    if (startedAt != null && event.timeStamp > startedAt) {
+                        totals[packageName] = (totals[packageName] ?: 0L) + (event.timeStamp - startedAt)
+                    }
+                }
+            }
+        }
+
+        activeStarts.forEach { (packageName, startedAt) ->
+            if (to > startedAt) {
+                totals[packageName] = (totals[packageName] ?: 0L) + (to - startedAt)
+            }
+        }
+
+        return totals
     }
 
     // ─────────────────────────────────────────────────────────────────

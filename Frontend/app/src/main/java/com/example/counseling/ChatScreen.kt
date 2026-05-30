@@ -420,12 +420,7 @@ fun ChatScreen(
             memoryStore.reindexSession(messages.toList(), currentSessionId)
             sessionSummaries = sessionStore.listSessions()
         }
-        status = liteRtEngine.initialize()
-        if (status.isModelLoaded) {
-            status = liteRtEngine.updateSystemInstruction(
-                buildSystemPromptWithMemories(systemPrompt, importantMemories),
-            )
-        }
+        status = EngineStatus(false, "모델 파일을 선택해 주세요.")
     }
 
     LaunchedEffect(messages.size) {
@@ -456,7 +451,6 @@ fun ChatScreen(
                 activeAudioRecording?.recorder?.stop()
                 activeAudioRecording?.recorder?.release()
             }
-            liteRtEngine.release()
         }
     }
 
