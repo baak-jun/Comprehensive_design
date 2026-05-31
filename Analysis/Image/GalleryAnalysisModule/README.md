@@ -71,7 +71,7 @@ F_SafeRiskCueOnly:
 이 모듈은 진단 모델이 아닙니다. 결과는 상담 질문의 방향을 정하는 보조 정보이며, 사용자의 직접 발화와 질문지 응답을 항상 우선합니다.
 
 
-## v3.4.2 Prompt Usability 개선
+## v3.4.3 Prompt Usability 개선
 
 - AI 상담 프롬프트를 `COUNSELING BRIEF - READ FIRST`, `USE NOW`, `USE LATER`, `PREFERENCE / RECOVERY RESOURCES`, `MICRO ACTION PLAN - FINAL PHASE ONLY`로 재구성했습니다.
 - 라포 단계에서는 생활 개선 제안을 금지하고, 사용자 경험 확인 질문 1개만 생성하도록 명시했습니다.
@@ -80,9 +80,16 @@ F_SafeRiskCueOnly:
 - 평균 신뢰도/분류 커버리지/보정 의존도에 대한 경고를 더 눈에 띄게 표시합니다.
 
 
-## v3.4.2 최종 프롬프트 보완
+## v3.4.3 최종 프롬프트 보완
 - Active Focus와 Supporting Focus를 분리했습니다. LLM은 라포 단계에서 Active Focus 1개만 질문합니다.
 - Supporting Focus는 사용자가 관련 경험을 말한 뒤에만 사용하도록 프롬프트를 명시했습니다.
 - 보정률이 높은 경우 HIGH_CORRECTION_DEPENDENCY 경고가 AI 프롬프트 내부에도 포함됩니다.
 - 선호/회복 자원 질문 문장을 더 완곡하게 조정했습니다.
 - 조사 오류를 보정했습니다.
+
+
+## v3.4.3 패치
+- SLEEP/SCHOOL 점수에 delta 방향성 gate 적용
+- Active Focus 1개, Supporting Focus 최대 1개로 고정
+- RECOVERY_RESOURCE가 주요 도메인을 밀어내지 않도록 후반부 자원 블록으로 이동
+- MEAL_ROUTINE은 시간대/루틴 변화가 있을 때만 MEDIUM 이상 허용

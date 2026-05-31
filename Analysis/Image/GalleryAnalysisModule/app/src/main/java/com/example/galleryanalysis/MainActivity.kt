@@ -44,13 +44,13 @@ class MainActivity : ComponentActivity() {
         }
 
         val title = TextView(this).apply {
-            text = "갤러리 상담 분석 v3.4.2 최종 프롬프트"
+            text = "갤러리 상담 분석 v3.4.3 도메인 게이트 패치"
             textSize = 24f
             gravity = Gravity.CENTER_HORIZONTAL
             setPadding(0, 0, 0, 24)
         }
         statusText = TextView(this).apply {
-            text = "분석 전입니다. 버튼을 누르면 MediaStore + ML Kit + WHO 도메인 상담 신호/선호 자원/단계별 프롬프트/감사 로그를 실행합니다."
+            text = "분석 전입니다. 버튼을 누르면 MediaStore + ML Kit + WHO 도메인 게이트/선호 자원/단계별 프롬프트/감사 로그를 실행합니다."
             textSize = 14f
             setPadding(0, 0, 0, 16)
         }
