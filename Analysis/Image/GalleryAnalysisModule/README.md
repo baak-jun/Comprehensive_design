@@ -71,7 +71,7 @@ F_SafeRiskCueOnly:
 이 모듈은 진단 모델이 아닙니다. 결과는 상담 질문의 방향을 정하는 보조 정보이며, 사용자의 직접 발화와 질문지 응답을 항상 우선합니다.
 
 
-## v3.4.3 Prompt Usability 개선
+## v3.4.5 Prompt Usability 개선
 
 - AI 상담 프롬프트를 `COUNSELING BRIEF - READ FIRST`, `USE NOW`, `USE LATER`, `PREFERENCE / RECOVERY RESOURCES`, `MICRO ACTION PLAN - FINAL PHASE ONLY`로 재구성했습니다.
 - 라포 단계에서는 생활 개선 제안을 금지하고, 사용자 경험 확인 질문 1개만 생성하도록 명시했습니다.
@@ -80,7 +80,7 @@ F_SafeRiskCueOnly:
 - 평균 신뢰도/분류 커버리지/보정 의존도에 대한 경고를 더 눈에 띄게 표시합니다.
 
 
-## v3.4.3 최종 프롬프트 보완
+## v3.4.5 최종 프롬프트 보완
 - Active Focus와 Supporting Focus를 분리했습니다. LLM은 라포 단계에서 Active Focus 1개만 질문합니다.
 - Supporting Focus는 사용자가 관련 경험을 말한 뒤에만 사용하도록 프롬프트를 명시했습니다.
 - 보정률이 높은 경우 HIGH_CORRECTION_DEPENDENCY 경고가 AI 프롬프트 내부에도 포함됩니다.
@@ -88,8 +88,21 @@ F_SafeRiskCueOnly:
 - 조사 오류를 보정했습니다.
 
 
-## v3.4.3 패치
+## v3.4.5 패치
 - SLEEP/SCHOOL 점수에 delta 방향성 gate 적용
 - Active Focus 1개, Supporting Focus 최대 1개로 고정
 - RECOVERY_RESOURCE가 주요 도메인을 밀어내지 않도록 후반부 자원 블록으로 이동
 - MEAL_ROUTINE은 시간대/루틴 변화가 있을 때만 MEDIUM 이상 허용
+
+
+## v3.4.5 Safety Overlay 패치
+
+이번 버전은 안전 시각 단서가 수면/학업/활동 도메인과 경쟁하다가 묻히는 문제를 줄였습니다.
+
+- `VisualRiskCueDetector`를 강화해 상처/붕대/부상/신체 클로즈업 조합을 안전 확인 보조 단서로 탐지합니다.
+- 이미지 단독 안전 단서는 최대 `MEDIUM_CHECK_IN`까지만 허용합니다. `HIGH_SUPPORT`와 `IMMEDIATE_DANGER`는 직접 발화/질문지 같은 명시적 위험 신호가 있을 때만 사용합니다.
+- `Safety Overlay`를 LLM 프롬프트에 별도 표시합니다.
+- `PHYSICAL_ACTIVITY` Active threshold를 높여 정상 기준선에서 작은 활동 감소가 과잉 Active로 뜨는 문제를 완화했습니다.
+- `SCHOOL_STRESS`는 야간 증가가 없어도 학업/과제 증가가 충분하면 Active 후보가 될 수 있도록 recall을 보강했습니다.
+
+권장 테스트 순서: A → B → C → D → E. 특히 E에서는 `Safety = LOW_OBSERVE` 또는 `MEDIUM_CHECK_IN`, `HIGH_SUPPORT 금지`, `이미지 단독 확정 금지`가 기대값입니다.

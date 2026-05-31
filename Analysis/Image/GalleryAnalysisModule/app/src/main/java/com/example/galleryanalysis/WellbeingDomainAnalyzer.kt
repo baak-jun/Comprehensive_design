@@ -7,14 +7,16 @@ import kotlin.math.max
 import kotlin.math.min
 
 /**
- * v3.4.3 WHO-aligned counseling signal engine.
+ * v3.4.5 WHO-aligned counseling signal engine.
  *
  * 이번 패치의 핵심:
- * 1) delta 방향성 gate: 최근 비율이 늘지 않았는데 SLEEP/SCHOOL HIGH가 뜨는 문제 차단.
- * 2) late-study 보조 gate: 야간 학업은 recent late-study가 baseline보다 증가할 때만 수면/학업 보조 근거로 사용.
- * 3) Active Focus는 실제 질문 1개만. Supporting Focus는 최대 1개이며 첫 턴에서 묻지 않는다.
- * 4) RECOVERY_RESOURCE는 주요 문제 도메인(SLEEP/SOCIAL/PHYSICAL)이 있으면 Active로 올라가지 않고 후반부 회복자원 블록으로 내려간다.
- * 5) MEAL_ROUTINE은 food count가 아니라 시간대/규칙성 변화가 있어야만 MEDIUM 이상이 된다.
+ * 1) Safety Overlay: 안전 시각 단서는 생활 패턴 도메인과 경쟁하지 않고 별도 우선 채널로 출력한다.
+ * 2) 이미지 단독 안전 단서는 최대 MEDIUM_CHECK_IN까지만 허용하고, 자해/폭력/성폭력 확정은 금지한다.
+ * 3) A 안정 기준선 과탐지를 줄이기 위해 PHYSICAL_ACTIVITY Active 임계값을 상향했다.
+ * 4) SCHOOL_STRESS는 야간 신호가 없어도 충분한 학업 증가가 있으면 Active 후보가 될 수 있게 recall을 보강했다.
+ * 5) RECOVERY_RESOURCE는 주요 문제 도메인이 있으면 후반부 회복자원 블록으로 내려간다.
+ * 6) v3.4.5 False-positive guard: 비율 변화만으로 HIGH/Active가 뜨지 않도록
+ *    실제 event count 변화, 주당 rate 변화, baseline expected recent count를 함께 확인한다.
  */
 class WellbeingDomainAnalyzer(
     private val recentDays: Long = 14,
@@ -114,9 +116,29 @@ class WellbeingDomainAnalyzer(
         val physicalRecent = m.domainRatio(WellbeingDomain.PHYSICAL_ACTIVITY, recent = true)
         val physicalBaseline = m.domainRatio(WellbeingDomain.PHYSICAL_ACTIVITY, recent = false)
         val physicalDelta = physicalRecent - physicalBaseline
-        val physicalScore = if (physicalDelta < -0.045) {
-            scaleNegative(physicalDelta, med = -0.10, high = -0.22) * supportBoost(m.baselinePhysical, m.recentPhysical)
-        } else 0.0
+        val physicalStrongDrop = m.meaningfulDecrease(
+            recentCount = m.recentPhysical,
+            baselineCount = m.baselinePhysical,
+            ratioDelta = physicalDelta,
+            minBaseline = 12,
+            maxRecentToExpected = 0.45,
+            minAbsRateDrop = 1.80,
+            minRatioDrop = -0.18
+        ) || (m.baselinePhysical >= 18 && m.recentPhysical <= 1 && physicalDelta <= -0.14)
+        val physicalModerateDrop = m.meaningfulDecrease(
+            recentCount = m.recentPhysical,
+            baselineCount = m.baselinePhysical,
+            ratioDelta = physicalDelta,
+            minBaseline = 8,
+            maxRecentToExpected = 0.60,
+            minAbsRateDrop = 1.10,
+            minRatioDrop = -0.12
+        )
+        val physicalScore = when {
+            physicalStrongDrop -> max(0.74, scaleNegative(physicalDelta, med = -0.16, high = -0.30))
+            physicalModerateDrop -> min(0.58, scaleNegative(physicalDelta, med = -0.12, high = -0.24))
+            else -> 0.0
+        }
         scores += score(
             domain = WellbeingDomain.PHYSICAL_ACTIVITY,
             rawScore = physicalScore,
@@ -188,13 +210,35 @@ class WellbeingDomainAnalyzer(
         val studyBaseline = m.domainRatio(WellbeingDomain.SCHOOL_STRESS, recent = false)
         val studyDelta = studyRecent - studyBaseline
         val lateStudyRatio = if (m.recentStudy == 0) 0.0 else m.recentLateStudy.toDouble() / m.recentStudy
-        val studyDeltaScore = if (studyDelta > 0.045 && m.recentStudy >= 5) scalePositive(studyDelta, med = 0.09, high = 0.20) else 0.0
+        val studyDeltaScore = if (studyDelta > 0.045 && m.recentStudy >= 5) scalePositive(studyDelta, med = 0.10, high = 0.24) else 0.0
+        val studyStrongIncrease = m.meaningfulIncrease(
+            recentCount = m.recentStudy,
+            baselineCount = m.baselineStudy,
+            ratioDelta = studyDelta,
+            minRecent = 10,
+            minCountDiff = 4,
+            minAbsRateIncrease = 1.75,
+            minRatioIncrease = 0.16
+        )
+        val studyModerateIncrease = m.meaningfulIncrease(
+            recentCount = m.recentStudy,
+            baselineCount = m.baselineStudy,
+            ratioDelta = studyDelta,
+            minRecent = 7,
+            minCountDiff = 3,
+            minAbsRateIncrease = 1.10,
+            minRatioIncrease = 0.10
+        )
         val schoolScore = when {
             studyDelta <= 0.0 -> 0.0
-            m.recentStudy < 5 -> min(0.35, studyDeltaScore)
-            (sleepScore >= 0.55 || lateStudyDelta > 0.045) && lateStudyRatio >= 0.25 -> max(0.68, studyDeltaScore)
-            studyDelta >= 0.18 && m.recentStudy >= 8 -> min(0.58, studyDeltaScore)
-            else -> min(0.48, studyDeltaScore)
+            m.recentStudy < 5 -> min(0.28, studyDeltaScore)
+            (sleepScore >= 0.55 || lateStudyDelta > 0.045) && lateStudyRatio >= 0.25 && studyModerateIncrease -> max(0.72, studyDeltaScore)
+            // v3.4.5: 야간 증가가 없어도 학업/과제 비율이 충분히 늘 수 있으나,
+            // recent-baseline count 차이가 작으면 A 안정 기준선에서 false positive가 발생하므로 HIGH 금지.
+            studyStrongIncrease -> max(0.62, min(0.76, studyDeltaScore))
+            studyModerateIncrease -> max(0.45, min(0.58, studyDeltaScore))
+            studyDelta >= 0.08 && m.recentStudy >= 6 -> min(0.38, studyDeltaScore)
+            else -> min(0.30, studyDeltaScore)
         }
         scores += score(
             domain = WellbeingDomain.SCHOOL_STRESS,
@@ -218,9 +262,30 @@ class WellbeingDomainAnalyzer(
         val recoveryBaseline = m.domainRatio(WellbeingDomain.RECOVERY_RESOURCE, recent = false)
         val recoveryDelta = recoveryRecent - recoveryBaseline
         val topResourceStrength = preferences.take(5).maxOfOrNull { it.recurrenceScore } ?: 0.0
-        val recoveryScore = if (recoveryDelta < -0.06 && topResourceStrength >= 0.42) {
-            scaleNegative(recoveryDelta, med = -0.11, high = -0.22)
-        } else 0.0
+        val recoveryStrongDrop = m.meaningfulDecrease(
+            recentCount = m.recentRecovery,
+            baselineCount = m.baselineRecovery,
+            ratioDelta = recoveryDelta,
+            minBaseline = 12,
+            maxRecentToExpected = 0.42,
+            minAbsRateDrop = 1.80,
+            minRatioDrop = -0.18
+        )
+        val recoveryModerateDrop = m.meaningfulDecrease(
+            recentCount = m.recentRecovery,
+            baselineCount = m.baselineRecovery,
+            ratioDelta = recoveryDelta,
+            minBaseline = 8,
+            maxRecentToExpected = 0.60,
+            minAbsRateDrop = 1.10,
+            minRatioDrop = -0.10
+        )
+        val recoveryScore = when {
+            topResourceStrength < 0.42 -> 0.0
+            recoveryStrongDrop -> max(0.70, scaleNegative(recoveryDelta, med = -0.14, high = -0.28))
+            recoveryModerateDrop -> min(0.58, scaleNegative(recoveryDelta, med = -0.10, high = -0.22))
+            else -> 0.0
+        }
         scores += score(
             domain = WellbeingDomain.RECOVERY_RESOURCE,
             rawScore = recoveryScore,
@@ -245,11 +310,12 @@ class WellbeingDomainAnalyzer(
         val nightMealRatio = if (m.recentMeal == 0) 0.0 else m.recentNightMeal.toDouble() / m.recentMeal
         val mealSupport = m.recentMeal + m.baselineMeal
         val mealTimeShift = abs(mealDelta)
+        val mealCountShift = abs(m.rateDelta(m.recentMeal, m.baselineMeal)) >= 1.20
         val mealScore = when {
             mealSupport < 8 -> 0.0
             nightMealRatio >= 0.35 && m.recentNightMeal >= 3 -> max(0.55, scalePositive(nightMealRatio, 0.35, 0.65))
-            mealTimeShift >= 0.12 && (physicalScore >= 0.45 || sedentaryScore >= 0.45 || sleepScore >= 0.45) -> min(0.68, scalePositive(mealTimeShift, 0.12, 0.25))
-            mealTimeShift >= 0.18 -> min(0.55, scalePositive(mealTimeShift, 0.18, 0.32))
+            mealTimeShift >= 0.14 && mealCountShift && (physicalScore >= 0.45 || sedentaryScore >= 0.45 || sleepScore >= 0.45) -> min(0.62, scalePositive(mealTimeShift, 0.14, 0.28))
+            mealTimeShift >= 0.22 && mealCountShift -> min(0.50, scalePositive(mealTimeShift, 0.22, 0.36))
             else -> 0.0
         }
         scores += score(
@@ -270,21 +336,26 @@ class WellbeingDomainAnalyzer(
             microAction = "내일 한 끼만 일정한 시간에 먹기"
         )
 
-        val safetyRaw = visualRiskCues.sumOf { it.confidence * min(3, it.imageCount).toDouble() / 3.0 }
-        val safetyScore = min(0.48, safetyRaw)
+        val injuryCue = visualRiskCues.firstOrNull { it.cueType == VisualRiskCueType.POSSIBLE_INJURY_CONTEXT }
+        val safetyRaw = visualRiskCues.sumOf { it.confidence * min(4, it.imageCount).toDouble() / 3.0 }
+        val safetyScore = when {
+            injuryCue != null && injuryCue.imageCount >= 2 -> max(0.62, min(0.78, injuryCue.confidence + 0.12))
+            injuryCue != null -> max(0.42, min(0.62, injuryCue.confidence))
+            else -> min(0.42, safetyRaw)
+        }
         scores += score(
             domain = WellbeingDomain.SAFETY_AND_VIOLENCE,
             rawScore = safetyScore,
-            confidence = min(0.58, confidence(quality, m.recentTotal, labelAgreement = 0.45, crossSignal = 0.25, ambiguityPenalty = 0.20)),
+            confidence = if (injuryCue != null) min(0.78, confidence(quality, m.recentTotal, labelAgreement = 0.62, crossSignal = 0.80, ambiguityPenalty = 0.05)) else min(0.54, confidence(quality, m.recentTotal, labelAgreement = 0.45, crossSignal = 0.25, ambiguityPenalty = 0.20)),
             recentEvents = visualRiskCues.sumOf { it.imageCount },
             baselineEvents = 0,
             recentRatio = 0.0,
             baselineRatio = 0.0,
-            evidence = visualRiskCues.take(4).map { "${it.cueNameKo}: ${it.imageCount}장, conf=${fmt(it.confidence)}" }
+            evidence = visualRiskCues.take(5).map { "${it.cueNameKo}: ${it.imageCount}장, conf=${fmt(it.confidence)}" }
                 .ifEmpty { listOf("이미지 기반 안전 보조 단서 없음") },
-            counselingUse = "이미지 단서만으로 위기 판단 금지. LOW 수준의 컨디션/안전 확인 질문만 허용한다.",
-            firstQuestion = "요즘 몸이나 마음이 평소보다 지쳐 있다고 느끼는 순간이 있었나요?",
-            microAction = "도움 요청 문장 하나를 미리 적어두기"
+            counselingUse = "이미지 단서만으로 위기 판단 금지. 자해/폭력으로 단정하지 않고 현재 몸과 마음의 안전을 확인한다.",
+            firstQuestion = "요즘 몸이나 마음이 다치거나 위험하다고 느낀 적이 있나요?",
+            microAction = "도움이 필요할 때 연락할 사람이나 기관을 하나 정해두기"
         )
 
         return scores.sortedWith(compareByDescending<WellbeingDomainScore> { it.score }.thenByDescending { it.confidence })
@@ -372,6 +443,17 @@ class WellbeingDomainAnalyzer(
             )
         }
 
+        // v3.4.4: 이미지 단독 안전 단서는 HIGH로 확정하지 않지만, MEDIUM이면 첫 질문으로 안전 확인을 우선한다.
+        if (safety.level == SafetyLevel.MEDIUM_CHECK_IN) {
+            val safetyScore = scores.firstOrNull { it.domain == WellbeingDomain.SAFETY_AND_VIOLENCE }
+            return FocusPlan(
+                primary = listOfNotNull(safetyScore),
+                secondary = scores.filter { it.domain != WellbeingDomain.SAFETY_AND_VIOLENCE && it.level != WellbeingLevel.NONE }.take(4),
+                suggestedOpening = "요즘 몸이나 마음이 다치거나 위험하다고 느낀 적이 있나요?",
+                doNotStartWith = baseDoNotStart() + listOf("이미지 단서만으로 자해/폭력 피해를 확정하지 않는다.", "안전 확인 뒤에만 생활 패턴 이야기를 이어간다.")
+            )
+        }
+
         fun scoreOf(domain: WellbeingDomain): WellbeingDomainScore? = scores.firstOrNull { it.domain == domain }
         fun eligible(domain: WellbeingDomain, minScore: Double = 0.65): WellbeingDomainScore? {
             val s = scoreOf(domain) ?: return null
@@ -390,8 +472,11 @@ class WellbeingDomainAnalyzer(
         val active = majorOrder.asSequence()
             .mapNotNull { domain ->
                 val minScore = when (domain) {
-                    WellbeingDomain.RECOVERY_RESOURCE -> 0.72
-                    WellbeingDomain.MEAL_ROUTINE -> 0.62
+                    WellbeingDomain.PHYSICAL_ACTIVITY -> 0.74
+                    WellbeingDomain.SOCIAL_CONNECTION -> 0.62
+                    WellbeingDomain.SCHOOL_STRESS -> 0.62
+                    WellbeingDomain.RECOVERY_RESOURCE -> 0.78
+                    WellbeingDomain.MEAL_ROUTINE -> 0.72
                     else -> 0.65
                 }
                 eligible(domain, minScore)
@@ -477,6 +562,11 @@ class WellbeingDomainAnalyzer(
         appendLine("- 이미지 분석만으로 자살, 자해, 성폭력, 폭력 피해를 확정하지 않는다.")
         appendLine("- 직접 발화/질문지/명시적 위험 신호가 있으면 룰 기반 안전 응답이 LLM 자유 응답보다 우선한다.")
         appendLine("- currentSafetyLevel=${safety.level}, action=${safety.action}, ruleBased=${safety.mustUseRuleBasedResponse}")
+        if (safety.level == SafetyLevel.MEDIUM_CHECK_IN || safety.level == SafetyLevel.LOW_OBSERVE) {
+            appendLine("- safetyOverlay=true: 생활 패턴 도메인과 별개로 안전 확인을 고려한다.")
+            appendLine("- imageOnlyLimit=자해/폭력/성폭력 확정 금지, HIGH_SUPPORT 금지. 현재 안전 여부만 확인한다.")
+            safety.reasons.take(4).forEach { appendLine("- safetyEvidence=$it") }
+        }
         appendLine()
 
         appendLine("[CONVERSATION PHASE]")
@@ -596,6 +686,8 @@ class WellbeingDomainAnalyzer(
 
     private fun currentTask(phase: ConversationPhase, safety: SafetyAssessment, active: WellbeingDomainScore?): String {
         if (safety.mustUseRuleBasedResponse) return "룰 기반 위기 응답을 사용한다. 생활 패턴 조언을 먼저 하지 않는다."
+        if (safety.level == SafetyLevel.MEDIUM_CHECK_IN) return "이미지 기반 보조 단서가 있으므로, 자해/폭력으로 단정하지 않고 현재 몸과 마음의 안전 여부를 부드럽게 확인한다."
+        if (safety.level == SafetyLevel.LOW_OBSERVE) return "안전 보조 단서는 약하므로 일반 라포를 유지하되, 사용자가 힘듦을 말하면 안전/컨디션 확인으로 연결한다."
         return when (phase) {
             ConversationPhase.RAPPORT -> "라포 형성을 우선한다. ${active?.domainKo ?: "일반 안부"}에 대해 부드러운 질문 1개만 한다."
             ConversationPhase.PROBLEM_EXPLORATION -> "사용자의 답변을 반영하고, active focus 하나만 깊게 묻는다."
@@ -651,11 +743,62 @@ class WellbeingDomainAnalyzer(
         val recentMeal = recent.count { it.category == ActivityCategory.FOOD_MEAL }
         val baselineMeal = baseline.count { it.category == ActivityCategory.FOOD_MEAL }
         val recentNightMeal = recent.count { it.category == ActivityCategory.FOOD_MEAL && hour(it.takenAtMillis) >= 21 }
-        val socialDropScore = if (baselineSocial >= 3) {
-            scaleNegative(domainRatio(WellbeingDomain.SOCIAL_CONNECTION, true) - domainRatio(WellbeingDomain.SOCIAL_CONNECTION, false), -0.10, -0.22) * supportBoost(baselineSocial, recentSocial)
+        private val recentWeeks = recentDays / 7.0
+        private val baselineWeeks = baselineDays / 7.0
+
+        val socialDropScore = if (baselineSocial >= 8 && meaningfulDecrease(
+                recentCount = recentSocial,
+                baselineCount = baselineSocial,
+                ratioDelta = domainRatio(WellbeingDomain.SOCIAL_CONNECTION, true) - domainRatio(WellbeingDomain.SOCIAL_CONNECTION, false),
+                minBaseline = 8,
+                maxRecentToExpected = 0.55,
+                minAbsRateDrop = 1.25,
+                minRatioDrop = -0.12
+            )) {
+            scaleNegative(domainRatio(WellbeingDomain.SOCIAL_CONNECTION, true) - domainRatio(WellbeingDomain.SOCIAL_CONNECTION, false), -0.12, -0.26) * supportBoost(baselineSocial, recentSocial)
         } else 0.0
 
         fun ratio(count: Int, total: Int): Double = (count + 1.0) / (total + 5.0)
+
+        fun baselineExpectedRecent(baselineCount: Int): Double = baselineCount * (recentDays.toDouble() / baselineDays.toDouble())
+
+        fun rate(count: Int, recentWindow: Boolean): Double = count / (if (recentWindow) recentWeeks else baselineWeeks).coerceAtLeast(0.1)
+
+        fun rateDelta(recentCount: Int, baselineCount: Int): Double = rate(recentCount, true) - rate(baselineCount, false)
+
+        fun meaningfulIncrease(
+            recentCount: Int,
+            baselineCount: Int,
+            ratioDelta: Double,
+            minRecent: Int,
+            minCountDiff: Int,
+            minAbsRateIncrease: Double,
+            minRatioIncrease: Double
+        ): Boolean {
+            if (recentCount < minRecent) return false
+            if (recentCount - baselineCount < minCountDiff) return false
+            if (ratioDelta < minRatioIncrease) return false
+            if (rateDelta(recentCount, baselineCount) < minAbsRateIncrease) return false
+            return true
+        }
+
+        fun meaningfulDecrease(
+            recentCount: Int,
+            baselineCount: Int,
+            ratioDelta: Double,
+            minBaseline: Int,
+            maxRecentToExpected: Double,
+            minAbsRateDrop: Double,
+            minRatioDrop: Double
+        ): Boolean {
+            if (baselineCount < minBaseline) return false
+            if (ratioDelta > minRatioDrop) return false
+            val expected = baselineExpectedRecent(baselineCount)
+            if (recentCount > expected * maxRecentToExpected) return false
+            if (-rateDelta(recentCount, baselineCount) < minAbsRateDrop) return false
+            return true
+        }
+
 
         fun domainRatio(domain: WellbeingDomain, recent: Boolean): Double {
             val events = if (recent) this.recent else this.baseline
