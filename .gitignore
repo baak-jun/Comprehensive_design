@@ -1,5 +1,9 @@
 LLMmodels/
 
+# Python local caches
+__pycache__/
+*.py[cod]
+
 # Android/Kotlin frontend local files and build outputs
 Frontend/.gradle/
 Frontend/.kotlin/
