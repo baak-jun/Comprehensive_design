@@ -3,12 +3,12 @@ package com.example.counseling.voiceemotion
 import android.content.Context
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import org.tensorflow.lite.Interpreter
+import org.pytorch.IValue
+import org.pytorch.LiteModuleLoader
+import org.pytorch.Module
+import org.pytorch.Tensor
 import java.io.File
-import java.io.FileInputStream
 import java.io.RandomAccessFile
-import java.nio.MappedByteBuffer
-import java.nio.channels.FileChannel
 import kotlin.math.min
 
 enum class VoiceEmotion(val displayName: String) {
@@ -25,25 +25,36 @@ data class VoiceEmotionResult(
     val probabilities: Map<VoiceEmotion, Float>,
 ) {
     val confidencePercent: Float get() = confidence * 100f
+
+    fun displaySummary(): String {
+        return "감정: ${emotion.displayName}(${confidencePercent.formatPercent()}%)"
+    }
+
+    fun probabilitySummary(): String {
+        return probabilities.entries.joinToString(", ") { (emotion, probability) ->
+            "${emotion.displayName} ${(probability * 100f).formatPercent()}%"
+        }
+    }
 }
 
-class LiteRtVoiceEmotionAnalyzer(
+class PyTorchVoiceEmotionAnalyzer(
     private val context: Context,
-    private val modelFileName: String = "voice_emotion.tflite",
+    private val modelFileName: String = "wav2vec2_korean_emotion.ptl",
     private val maxSamples: Int = 16000 * 12,
 ) : AutoCloseable {
-    private var interpreter: Interpreter? = null
+    private var module: Module? = null
 
     suspend fun analyze(audioFile: File): VoiceEmotionResult? = withContext(Dispatchers.Default) {
-        val model = loadInterpreterOrNull() ?: return@withContext null
+        val model = loadModuleOrNull() ?: return@withContext null
         val waveform = readWavAsMonoFloat32(audioFile, maxSamples)
         if (waveform.isEmpty()) return@withContext null
 
-        val input = arrayOf(waveform)
-        val output = Array(1) { FloatArray(VoiceEmotion.entries.size) }
-        model.run(input, output)
+        val input = Tensor.fromBlob(waveform, longArrayOf(1L, waveform.size.toLong()))
+        val output = model.forward(IValue.from(input)).toTensor()
+        val logits = output.dataAsFloatArray.take(VoiceEmotion.entries.size).toFloatArray()
+        if (logits.size != VoiceEmotion.entries.size) return@withContext null
 
-        val probabilities = softmax(output[0])
+        val probabilities = softmax(logits)
         val bestIndex = probabilities.indices.maxByOrNull { probabilities[it] } ?: return@withContext null
         VoiceEmotionResult(
             emotion = VoiceEmotion.entries[bestIndex],
@@ -76,14 +87,10 @@ class LiteRtVoiceEmotionAnalyzer(
             """.trimIndent()
         }
 
-        val probabilityText = result.probabilities.entries.joinToString(", ") { (emotion, probability) ->
-            "${emotion.displayName} ${(probability * 100f).formatPercent()}%"
-        }
-
         return """
             [음성 감정 분석]
             녹음된 사용자 음성의 주요 감정은 ${result.emotion.displayName}(${result.confidencePercent.formatPercent()}%)로 추정됩니다.
-            전체 분포: $probabilityText
+            전체 분포: ${result.probabilitySummary()}
 
             [응답 조정 지침]
             $guideline
@@ -93,33 +100,31 @@ class LiteRtVoiceEmotionAnalyzer(
     }
 
     override fun close() {
-        interpreter?.close()
-        interpreter = null
+        module?.destroy()
+        module = null
     }
 
-    private fun loadInterpreterOrNull(): Interpreter? {
-        interpreter?.let { return it }
-        val buffer = runCatching { mapModelFile() }.getOrNull() ?: return null
-        return Interpreter(buffer).also { interpreter = it }
+    private fun loadModuleOrNull(): Module? {
+        module?.let { return it }
+        val path = runCatching { resolveModelPath() }.getOrNull() ?: return null
+        return LiteModuleLoader.load(path).also { module = it }
     }
 
-    private fun mapModelFile(): MappedByteBuffer {
+    private fun resolveModelPath(): String {
         val externalModel = File(File(context.getExternalFilesDir(null), "models"), modelFileName)
         if (externalModel.exists() && externalModel.isFile && externalModel.canRead()) {
-            return FileInputStream(externalModel).channel.use { channel ->
-                channel.map(FileChannel.MapMode.READ_ONLY, 0L, channel.size())
-            }
+            return externalModel.absolutePath
         }
 
-        context.assets.openFd("models/$modelFileName").use { descriptor ->
-            FileInputStream(descriptor.fileDescriptor).channel.use { channel ->
-                return channel.map(
-                    FileChannel.MapMode.READ_ONLY,
-                    descriptor.startOffset,
-                    descriptor.declaredLength,
-                )
+        val target = File(context.filesDir, modelFileName)
+        if (!target.exists() || target.length() == 0L) {
+            context.assets.open("models/$modelFileName").use { input ->
+                target.outputStream().use { output ->
+                    input.copyTo(output, bufferSize = 1024 * 1024)
+                }
             }
         }
+        return target.absolutePath
     }
 }
 

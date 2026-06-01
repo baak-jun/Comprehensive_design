@@ -66,7 +66,7 @@ import com.example.counseling.llm.ChatMessage
 import com.example.counseling.llm.ChatRole
 import com.example.counseling.llm.EngineStatus
 import com.example.counseling.llm.LiteRtLmCounselingEngine
-import com.example.counseling.voiceemotion.LiteRtVoiceEmotionAnalyzer
+import com.example.counseling.voiceemotion.PyTorchVoiceEmotionAnalyzer
 import kotlinx.coroutines.launch
 import java.io.File
 import java.util.Locale
@@ -82,7 +82,7 @@ fun ChatScreen(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val liteRtEngine = remember { LiteRtLmCounselingEngine(context.applicationContext) }
-    val voiceEmotionAnalyzer = remember { LiteRtVoiceEmotionAnalyzer(context.applicationContext) }
+    val voiceEmotionAnalyzer = remember { PyTorchVoiceEmotionAnalyzer(context.applicationContext) }
     val sessionStore = remember { ChatSessionStore(context.applicationContext) }
     val memoryStore = remember { ChatMemoryStore(context.applicationContext) }
     val imeBottomPadding = 0.dp
@@ -840,23 +840,27 @@ fun ChatScreen(
 }
 
 private suspend fun ChatMessage.withVoiceEmotionContext(
-    voiceEmotionAnalyzer: LiteRtVoiceEmotionAnalyzer,
+    voiceEmotionAnalyzer: PyTorchVoiceEmotionAnalyzer,
     updateStatus: (String) -> Unit,
 ): ChatMessage {
     val audio = audioPath?.let { File(it) }?.takeIf { it.exists() && it.length() > 44L }
         ?: return this
     updateStatus("음성 감정 분석 중입니다...")
-    val contextText = runCatching {
-        voiceEmotionAnalyzer.analyze(audio)?.let { result ->
-            voiceEmotionAnalyzer.buildPromptContext(result)
-        }
+    val result = runCatching {
+        voiceEmotionAnalyzer.analyze(audio)
     }.getOrNull()
-    if (contextText == null) {
+    if (result == null) {
         updateStatus("음성 감정 모델을 찾지 못했거나 분석에 실패했습니다. 음성 첨부만 전달합니다.")
         return this
     }
-    updateStatus("음성 감정 분석을 프롬프트에 반영했습니다.")
+    val contextText = voiceEmotionAnalyzer.buildPromptContext(result)
+    updateStatus("음성 감정 분석 완료: ${result.displaySummary()} · ${result.probabilitySummary()}")
+    val visibleLabel = listOfNotNull(
+        attachmentLabel,
+        result.displaySummary(),
+    ).joinToString(" · ")
     return copy(
+        attachmentLabel = visibleLabel,
         content = """
             $contextText
 
