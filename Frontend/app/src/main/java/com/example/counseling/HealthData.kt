@@ -63,6 +63,20 @@ suspend fun readHealthSummary(context: Context, period: HealthPeriod): HealthSum
     }
 }
 
+suspend fun refreshHealthRagSlot(context: Context, period: HealthPeriod): String? {
+    val summary = readHealthSummary(context, period)
+    val contextText = summary.toPromptContext()
+    if (contextText != null) {
+        replaceRagSlot(
+            context = context,
+            slot = RagSlot.Health,
+            contextText = contextText,
+            source = "Health Connect ${period.label} 요약",
+        )
+    }
+    return contextText
+}
+
 suspend fun readHealthDaySummary(
     client: HealthConnectClient,
     date: LocalDate,

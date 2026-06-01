@@ -13,7 +13,7 @@ android {
         minSdk = 28
         targetSdk = 36
         versionCode = 1
-        versionName = "1.0.3"
+        versionName = "1.0.5"
 
     }
 
@@ -37,8 +37,14 @@ android {
     }
 
     androidResources {
-        noCompress += listOf("gguf", "litertlm", "task")
+        noCompress += listOf("gguf", "litertlm", "task", "tflite")
         ignoreAssetsPattern = "*.gguf"
+    }
+
+    packaging {
+        jniLibs {
+            pickFirsts += listOf("lib/*/libLiteRt.so")
+        }
     }
 }
 
@@ -47,7 +53,7 @@ tasks.register("copyDatedDebugApk") {
         copy {
             from(layout.buildDirectory.file("outputs/apk/debug/app-debug.apk"))
             into(layout.buildDirectory.dir("outputs/apk/debug"))
-            rename { "Counseling_06_01_v1.0.3_debug.apk" }
+            rename { "Counseling_06_01_v1.0.5_debug.apk" }
         }
     }
 }
@@ -69,6 +75,7 @@ dependencies {
     implementation(libs.androidx.material3)
     implementation(libs.androidx.health.connect)
     implementation(libs.litertlm.android)
+    implementation(libs.litert)
     implementation(libs.mediapipe.tasks.genai)
     implementation(libs.androidx.exifinterface)
     implementation(libs.gson)
