@@ -25,6 +25,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 
 data class PromptPreviewState(
+    val fixedPolicy: String,
     val healthContext: String?,
     val phenotypeContext: String?,
     val galleryContext: String?,
@@ -38,7 +39,7 @@ fun PromptOverviewDialog(
     onApply: (String) -> Unit,
     onDismiss: () -> Unit,
 ) {
-    var editablePrompt by remember(systemPrompt) { mutableStateOf(systemPrompt) }
+    var editablePrompt by remember(systemPrompt) { mutableStateOf(normalizeEditableSystemPrompt(systemPrompt)) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -51,6 +52,9 @@ fun PromptOverviewDialog(
                     .verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
+                Text("읽기 전용 고정 정책", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                ReadOnlyPromptBlock("상담 안전 / WHO 청소년 활동 기준", preview?.fixedPolicy ?: fixedCounselingPolicy)
+
                 Text("수정 가능", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
                 OutlinedTextField(
                     value = editablePrompt,
@@ -58,7 +62,7 @@ fun PromptOverviewDialog(
                     minLines = 8,
                     maxLines = 14,
                     modifier = Modifier.fillMaxWidth(),
-                    label = { Text("기본 상담 지침") },
+                    label = { Text("말투 / 응답 선호") },
                 )
 
                 Text("읽기 전용 자동 주입 맥락", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)

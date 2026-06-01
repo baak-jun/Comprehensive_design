@@ -66,7 +66,9 @@ import com.example.counseling.llm.ChatMessage
 import com.example.counseling.llm.ChatRole
 import com.example.counseling.llm.EngineStatus
 import com.example.counseling.llm.LiteRtLmCounselingEngine
+import com.example.counseling.voiceemotion.LiteRtVoiceEmotionAnalyzer
 import kotlinx.coroutines.launch
+import java.io.File
 import java.util.Locale
 
 @Composable
@@ -80,6 +82,7 @@ fun ChatScreen(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val liteRtEngine = remember { LiteRtLmCounselingEngine(context.applicationContext) }
+    val voiceEmotionAnalyzer = remember { LiteRtVoiceEmotionAnalyzer(context.applicationContext) }
     val sessionStore = remember { ChatSessionStore(context.applicationContext) }
     val memoryStore = remember { ChatMemoryStore(context.applicationContext) }
     val imeBottomPadding = 0.dp
@@ -95,7 +98,7 @@ fun ChatScreen(
 
     var status by remember { mutableStateOf(EngineStatus(false, "모델 파일을 선택해 주세요.")) }
     var input by remember { mutableStateOf("") }
-    var systemPrompt by remember { mutableStateOf(LiteRtLmCounselingEngine.defaultSystemInstruction) }
+    var systemPrompt by remember { mutableStateOf(defaultUserCustomInstruction) }
     var showSystemPrompt by remember { mutableStateOf(false) }
     var showPromptOverview by remember { mutableStateOf(false) }
     var promptPreview by remember { mutableStateOf<PromptPreviewState?>(null) }
@@ -133,6 +136,7 @@ fun ChatScreen(
 
     fun loadPromptPreview() {
         promptPreview = PromptPreviewState(
+            fixedPolicy = fixedCounselingPolicy,
             healthContext = "불러오는 중...",
             phenotypeContext = "불러오는 중...",
             galleryContext = "불러오는 중...",
@@ -140,12 +144,12 @@ fun ChatScreen(
         )
         scope.launch {
             val healthContext = if (includeHealthContext) {
-                readHealthSummary(context, healthContextPeriod).toPromptContext()
+                refreshHealthRagSlot(context, healthContextPeriod)
             } else {
                 null
             }
             val phenotypeContext = if (includePhenotypeContext) {
-                readPhenotypePromptContext(context).contextText
+                refreshPhenotypeRagSlot(context).contextText
             } else {
                 null
             }
@@ -154,11 +158,17 @@ fun ChatScreen(
             } else {
                 null
             }
-            val memoryContext = buildSystemPromptWithMemories(systemPrompt, importantMemories)
-                .removePrefix(systemPrompt)
-                .trim()
-                .ifBlank { "사용자 추가 기억이 없습니다. 기본 기억은 시스템 지침에 함께 적용됩니다." }
+            val memoryContext = buildString {
+                appendLine("[기본 중요 기억]")
+                defaultImportantMemories.forEach { appendLine("- $it") }
+                if (importantMemories.isNotEmpty()) {
+                    appendLine()
+                    appendLine("[사용자가 중요하다고 저장한 개인 맥락]")
+                    importantMemories.takeLast(20).forEach { appendLine("- $it") }
+                }
+            }.trim()
             promptPreview = PromptPreviewState(
+                fixedPolicy = fixedCounselingPolicy,
                 healthContext = healthContext,
                 phenotypeContext = phenotypeContext,
                 galleryContext = galleryContext,
@@ -266,7 +276,7 @@ fun ChatScreen(
                     listOf(ChatMessage(ChatRole.Assistant, "불러온 상담에 메시지가 없습니다."))
                 })
                 if (saved.systemPrompt.isNotBlank()) {
-                    systemPrompt = saved.systemPrompt
+                    systemPrompt = normalizeEditableSystemPrompt(saved.systemPrompt)
                 }
                 importantMemories.clear()
                 importantMemories.addAll(saved.importantMemories)
@@ -307,7 +317,7 @@ fun ChatScreen(
                         messages.addAll(imported.messages.ifEmpty {
                             listOf(ChatMessage(ChatRole.Assistant, "불러온 대화에 메시지가 없습니다."))
                         })
-                        systemPrompt = imported.systemPrompt.ifBlank { systemPrompt }
+                        systemPrompt = normalizeEditableSystemPrompt(imported.systemPrompt.ifBlank { systemPrompt })
                         importantMemories.clear()
                         importantMemories.addAll(imported.importantMemories)
                         currentSessionId = sessionStore.createSessionId()
@@ -328,7 +338,7 @@ fun ChatScreen(
             systemPrompt = systemPrompt,
             preview = promptPreview,
             onApply = { updatedPrompt ->
-                systemPrompt = updatedPrompt
+                systemPrompt = normalizeEditableSystemPrompt(updatedPrompt)
                 showPromptOverview = false
                 scope.launch {
                     status = liteRtEngine.updateSystemInstruction(
@@ -353,13 +363,14 @@ fun ChatScreen(
                     onValueChange = { systemPrompt = it },
                     minLines = 10,
                     maxLines = 18,
-                    label = { Text("상담 지침") },
+                    label = { Text("말투 / 응답 선호") },
                 )
             },
             confirmButton = {
                 Button(
                     onClick = {
                         showSystemPrompt = false
+                        systemPrompt = normalizeEditableSystemPrompt(systemPrompt)
                         scope.launch {
                             status = liteRtEngine.updateSystemInstruction(
                                 buildSystemPromptWithMemories(systemPrompt, importantMemories),
@@ -476,7 +487,7 @@ fun ChatScreen(
                 messages.addAll(saved.messages)
             }
             if (saved.systemPrompt.isNotBlank()) {
-                systemPrompt = saved.systemPrompt
+                systemPrompt = normalizeEditableSystemPrompt(saved.systemPrompt)
             }
             importantMemories.clear()
             importantMemories.addAll(saved.importantMemories)
@@ -514,6 +525,7 @@ fun ChatScreen(
             runCatching {
                 activeAudioRecording?.recorder?.stop()
                 activeAudioRecording?.recorder?.release()
+                voiceEmotionAnalyzer.close()
             }
         }
     }
@@ -671,20 +683,14 @@ fun ChatScreen(
 
             if (isGenerating || isLoadingModel) {
                 item {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.Start,
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        CircularProgressIndicator(modifier = Modifier.padding(12.dp))
-                        Text(
-                            when {
-                                isLoadingModel -> "모델 로드 중..."
-                                isThinking -> "사고 중..."
-                                else -> "응답 생성 중..."
-                            },
-                        )
-                    }
+                    BusyStatusRow(
+                        title = when {
+                            isLoadingModel -> "모델 로딩 중"
+                            isThinking -> "사고 중"
+                            else -> "응답 생성 중"
+                        },
+                        message = status.message,
+                    )
                 }
             }
         }
@@ -723,7 +729,7 @@ fun ChatScreen(
                 if ((text.isEmpty() && attachmentLabel == null) || isGenerating || isRecordingAudio || !status.isModelLoaded) return@MessageInput2
 
                 input = ""
-                val userMessage = ChatMessage(
+                val rawUserMessage = ChatMessage(
                     role = ChatRole.User,
                     content = text.ifBlank {
                         if (attachedAudioPath != null) {
@@ -737,46 +743,48 @@ fun ChatScreen(
                 )
                 attachedAudioPath = null
                 attachmentLabel = null
-                messages += userMessage
-                var savedImportantMemory = false
-                extractImportantMemory(userMessage.content)?.let { memory ->
-                    if (importantMemories.none { it.equals(memory, ignoreCase = true) }) {
-                        importantMemories += memory
-                        savedImportantMemory = true
-                    }
-                }
-                if (savedImportantMemory) {
-                    status = EngineStatus(status.isModelLoaded, "중요한 내용으로 저장했습니다.")
-                }
-                messages += ChatMessage(ChatRole.Assistant, "")
-                val assistantIndex = messages.lastIndex
                 isGenerating = true
                 val useThinking = shouldUseThinkingMode(
                     mode = thinkingMode,
                     text = text,
-                    hasAttachment = userMessage.imagePath != null || userMessage.audioPath != null,
+                    hasAttachment = rawUserMessage.imagePath != null || rawUserMessage.audioPath != null,
                     importantMemories = importantMemories,
                 )
                 isThinking = useThinking
 
                 scope.launch {
+                    val userMessage = rawUserMessage.withVoiceEmotionContext(
+                        voiceEmotionAnalyzer = voiceEmotionAnalyzer,
+                    ) { message ->
+                        status = EngineStatus(status.isModelLoaded, message)
+                    }
+                    messages += userMessage
+                    var savedImportantMemory = false
+                    extractImportantMemory(rawUserMessage.content)?.let { memory ->
+                        if (importantMemories.none { it.equals(memory, ignoreCase = true) }) {
+                            importantMemories += memory
+                            savedImportantMemory = true
+                        }
+                    }
+                    if (savedImportantMemory) {
+                        status = EngineStatus(status.isModelLoaded, "중요한 내용으로 저장했습니다.")
+                    }
+                    messages += ChatMessage(ChatRole.Assistant, "")
+                    val assistantIndex = messages.lastIndex
                     sessionStore.saveLastSession(messages.toList(), systemPrompt, importantMemories.toList(), currentSessionId)
                     memoryStore.reindexSession(messages.toList(), currentSessionId)
                     sessionSummaries = sessionStore.listSessions()
                     val healthContext = if (includeHealthContext) {
                         status = EngineStatus(status.isModelLoaded, "Health Connect 요약을 읽고 있습니다...")
-                        val summary = readHealthSummary(context, healthContextPeriod)
-                        summary.toPromptContext().also {
-                            if (it == null) {
-                                status = EngineStatus(status.isModelLoaded, summary.message)
-                            }
+                        refreshHealthRagSlot(context, healthContextPeriod).also {
+                            if (it == null) status = EngineStatus(status.isModelLoaded, "Health Connect 요약을 RAG 슬롯에 갱신하지 못했습니다.")
                         }
                     } else {
                         null
                     }
                     val phenotypeContext = if (includePhenotypeContext) {
                         status = EngineStatus(status.isModelLoaded, "생활 패턴 요약을 읽고 있습니다...")
-                        val result = readPhenotypePromptContext(context)
+                        val result = refreshPhenotypeRagSlot(context)
                         if (result.contextText == null) {
                             status = EngineStatus(status.isModelLoaded, result.message)
                         }
@@ -829,5 +837,32 @@ fun ChatScreen(
                 .imePadding(),
         )
     }
+}
+
+private suspend fun ChatMessage.withVoiceEmotionContext(
+    voiceEmotionAnalyzer: LiteRtVoiceEmotionAnalyzer,
+    updateStatus: (String) -> Unit,
+): ChatMessage {
+    val audio = audioPath?.let { File(it) }?.takeIf { it.exists() && it.length() > 44L }
+        ?: return this
+    updateStatus("음성 감정 분석 중입니다...")
+    val contextText = runCatching {
+        voiceEmotionAnalyzer.analyze(audio)?.let { result ->
+            voiceEmotionAnalyzer.buildPromptContext(result)
+        }
+    }.getOrNull()
+    if (contextText == null) {
+        updateStatus("음성 감정 모델을 찾지 못했거나 분석에 실패했습니다. 음성 첨부만 전달합니다.")
+        return this
+    }
+    updateStatus("음성 감정 분석을 프롬프트에 반영했습니다.")
+    return copy(
+        content = """
+            $contextText
+
+            [사용자 입력]
+            ${content.trim()}
+        """.trimIndent(),
+    )
 }
 

@@ -50,6 +50,12 @@ suspend fun refreshGalleryAnalysisCacheIfNeeded(
         contextText = buildGalleryPromptContext(result),
     )
     writeGalleryAnalysisCache(context, snapshot)
+    replaceRagSlot(
+        context = context,
+        slot = RagSlot.Gallery,
+        contextText = snapshot.contextText,
+        source = "Gallery 이미지 ${images.size}장 분석 요약",
+    )
     onProgress("Gallery 분석 문서를 갱신했습니다.")
     snapshot
 }
@@ -80,16 +86,8 @@ private suspend fun writeGalleryAnalysisCache(
     galleryAnalysisCacheFile(context).writeText(json.toString(2))
 }
 
-private fun buildGalleryPromptContext(result: GalleryAnalysisResult): String {
-    val summary = result.summary
-    return """
-        [갤러리 이미지 분석 보조 맥락]
-        이 자료는 사용자가 허용한 갤러리 이미지에서 나온 생활 패턴 보조 신호입니다. 진단, 감시, 단정의 근거로 쓰지 말고 사용자의 직접 발화와 현재 메시지를 우선하세요. 사용자에게 사진이나 갤러리를 직접 언급하지 마세요.
-        분석 요약: 전체 ${summary.totalImages}장, 분석 대상 ${summary.analyzableImages}장, 실제 분석 ${summary.analyzedImages}장, 이벤트 ${summary.eventCount}개.
-
-        ${result.counselingReport.llmContextSummary}
-    """.trimIndent()
-}
+private fun buildGalleryPromptContext(result: GalleryAnalysisResult): String =
+    result.counselingReport.llmContextSummary.trim()
 
 private fun galleryFingerprint(images: List<GalleryImage>): String {
     val digest = MessageDigest.getInstance("SHA-256")

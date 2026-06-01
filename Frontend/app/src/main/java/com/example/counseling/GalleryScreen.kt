@@ -57,25 +57,35 @@ fun GalleryScreen() {
     var cache by remember { mutableStateOf<GalleryAnalysisCacheSnapshot?>(null) }
     var showPermissionDialog by remember { mutableStateOf(false) }
     var showAnalysisDialog by remember { mutableStateOf(false) }
+    var isLoadingGallery by remember { mutableStateOf(false) }
+    var isAnalyzingGallery by remember { mutableStateOf(false) }
 
     fun loadImages(forceAnalysis: Boolean = false) {
         scope.launch {
-            access = galleryAccess(context)
-            message = "Gallery 이미지를 불러오는 중..."
-            images = queryGalleryImages(context)
-            val accessLabel = if (access == GalleryAccess.Partial) "선택한 사진" else "전체 사진"
-            if (images.isEmpty()) {
-                cache = readGalleryAnalysisCache(context)
-                message = "불러올 수 있는 이미지가 없습니다."
-            } else {
-                message = "$accessLabel 기준으로 이미지 ${images.size}장을 불러왔습니다."
-                cache = refreshGalleryAnalysisCacheIfNeeded(
-                    context = context,
-                    images = images,
-                    force = forceAnalysis,
-                    onProgress = { progressMessage -> message = progressMessage },
-                )
-                message = "$accessLabel 기준으로 이미지 ${images.size}장을 불러왔고 Gallery 분석 문서를 최신 상태로 맞췄습니다."
+            isLoadingGallery = true
+            isAnalyzingGallery = false
+            try {
+                access = galleryAccess(context)
+                message = "Gallery 이미지를 불러오는 중..."
+                images = queryGalleryImages(context)
+                val accessLabel = if (access == GalleryAccess.Partial) "선택한 사진" else "전체 사진"
+                if (images.isEmpty()) {
+                    cache = readGalleryAnalysisCache(context)
+                    message = "불러올 수 있는 이미지가 없습니다."
+                } else {
+                    message = "$accessLabel 기준으로 이미지 ${images.size}장을 불러왔습니다."
+                    isAnalyzingGallery = true
+                    cache = refreshGalleryAnalysisCacheIfNeeded(
+                        context = context,
+                        images = images,
+                        force = forceAnalysis,
+                        onProgress = { progressMessage -> message = progressMessage },
+                    )
+                    message = "$accessLabel 기준으로 이미지 ${images.size}장을 불러왔고 Gallery 분석 문서를 최신 상태로 맞췄습니다."
+                }
+            } finally {
+                isLoadingGallery = false
+                isAnalyzingGallery = false
             }
         }
     }
@@ -157,6 +167,7 @@ fun GalleryScreen() {
                     access = galleryAccess(context)
                     if (access == GalleryAccess.None) showPermissionDialog = true else loadImages()
                 },
+                enabled = !isLoadingGallery && !isAnalyzingGallery,
                 shape = RoundedCornerShape(8.dp),
             ) {
                 Text(
@@ -169,15 +180,25 @@ fun GalleryScreen() {
             }
             OutlinedButton(
                 onClick = { openAppSettings(context) },
+                enabled = !isLoadingGallery && !isAnalyzingGallery,
                 shape = RoundedCornerShape(8.dp),
             ) {
                 Text(if (access == GalleryAccess.Full) "권한 줄이기" else "권한 설정")
             }
         }
 
+        if (isLoadingGallery || isAnalyzingGallery) {
+            BusyStatusRow(
+                title = if (isAnalyzingGallery) "이미지 분석 중" else "갤러리 불러오는 중",
+                message = message,
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+            )
+        }
+
         GalleryAnalysisSummaryCard(
             cache = cache,
             enabled = access != GalleryAccess.None,
+            busy = isLoadingGallery || isAnalyzingGallery,
             onShow = { showAnalysisDialog = true },
             onRefresh = { loadImages(forceAnalysis = true) },
         )
@@ -200,6 +221,7 @@ fun GalleryScreen() {
 private fun GalleryAnalysisSummaryCard(
     cache: GalleryAnalysisCacheSnapshot?,
     enabled: Boolean,
+    busy: Boolean,
     onShow: () -> Unit,
     onRefresh: () -> Unit,
 ) {
@@ -224,14 +246,14 @@ private fun GalleryAnalysisSummaryCard(
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedButton(
                     onClick = onShow,
-                    enabled = cache != null,
+                    enabled = cache != null && !busy,
                     shape = RoundedCornerShape(8.dp),
                 ) {
                     Text("분석 결과 보기")
                 }
                 OutlinedButton(
                     onClick = onRefresh,
-                    enabled = enabled,
+                    enabled = enabled && !busy,
                     shape = RoundedCornerShape(8.dp),
                 ) {
                     Text("다시 분석")

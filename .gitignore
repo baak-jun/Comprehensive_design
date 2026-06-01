@@ -1,5 +1,8 @@
 LLMmodels/
 
+# Local voice emotion model artifacts
+Analysis/Voice/voice_emotion/final_korean_emotion_model/
+
 # Python local caches
 __pycache__/
 *.py[cod]

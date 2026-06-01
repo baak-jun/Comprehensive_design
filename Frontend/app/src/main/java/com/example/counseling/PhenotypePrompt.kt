@@ -27,6 +27,19 @@ suspend fun readPhenotypePromptContext(context: Context): PhenotypePromptResult 
     return PhenotypePromptResult(contextText, message)
 }
 
+suspend fun refreshPhenotypeRagSlot(context: Context): PhenotypePromptResult {
+    val result = readPhenotypePromptContext(context)
+    if (result.contextText != null) {
+        replaceRagSlot(
+            context = context,
+            slot = RagSlot.Phenotype,
+            contextText = result.contextText,
+            source = "통화 기록 및 앱 사용 패턴 요약",
+        )
+    }
+    return result
+}
+
 fun List<ChatMessage>.withPhenotypeContext(phenotypeContext: String?): List<ChatMessage> {
     if (phenotypeContext.isNullOrBlank()) return this
     val lastUserIndex = indexOfLast { it.role == ChatRole.User }
@@ -37,6 +50,10 @@ fun List<ChatMessage>.withPhenotypeContext(phenotypeContext: String?): List<Chat
         } else {
             message.copy(
                 content = """
+                    [동적 분석 맥락 - 생활 패턴]
+                    아래 자료는 사용자가 허용한 휴대폰 사용 패턴 요약입니다. 고정 정책의 좌식행동/여가 스크린 시간 기준과 함께 보조 맥락으로만 사용하세요.
+                    고립, 회피, 야간 사용, 과도한 스크린 시간이 의심되어도 단정하지 말고 현재 사용자 메시지와 연결될 때만 확인 질문이나 작은 행동 제안으로 다루세요.
+
                     $phenotypeContext
 
                     [현재 사용자 메시지]
