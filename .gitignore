@@ -1,0 +1,35 @@
+# ───────── Android / Gradle ─────────
+*.iml
+.gradle/
+/local.properties
+**/local.properties
+.idea/
+.DS_Store
+/build/
+**/build/
+/captures
+.externalNativeBuild
+.cxx/
+*.apk
+*.aab
+*.ap_
+*.dex
+
+# ───────── 온디바이스 모델 (대용량, Git 제외) ─────────
+# Gemma 모델은 절대 커밋하지 말 것 (1.3GB)
+*.bin
+*.task
+app/src/main/assets/models/
+
+# ───────── 서명 키 ─────────
+*.jks
+*.keystore
+
+# ───────── 로그 / 임시 ─────────
+*.log
+*.tmp
+dashboard/profiles/
+
+# ───────── OS ─────────
+Thumbs.db
+desktop.ini
