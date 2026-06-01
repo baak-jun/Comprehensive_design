@@ -1,0 +1,370 @@
+package com.psychocare.phenotype
+
+import android.app.AppOpsManager
+import android.app.usage.UsageEvents
+import android.app.usage.UsageStatsManager
+import android.content.Context
+import android.content.pm.ApplicationInfo
+import android.os.Build
+import android.os.Process
+import android.util.Log
+import com.psychocare.data.AppCategory
+import com.psychocare.data.AppUsageEntry
+import com.psychocare.data.AppUsageSummary
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import java.util.Calendar
+
+/**
+ * 앱 사용통계 분석기
+ *
+ * 필요 권한: PACKAGE_USAGE_STATS
+ *   → 일반 runtime 권한이 아님. 사용자가 직접 설정 > 앱 > 특별한 앱 접근 > 사용 정보 접근에서 허용 필요.
+ *   → Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS) 로 설정 화면 이동 유도.
+ *
+ * 수집 데이터:
+ *  - 7일간 앱별 사용 시간 (카테고리 분류 포함)
+ *  - 일일 평균 스크린 타임
+ *  - 야간(00~06시) 사용 시간
+ *  - 최장 단일 연속 세션
+ *  - 주간 스크린타임 변화율
+ */
+class AppUsageAnalyzer(private val context: Context) {
+
+    private val TAG = "AppUsageAnalyzer"
+
+    // ─────────────────────────────────────────────────────────────────
+    // 권한 확인 (AppOpsManager 방식 — 일반 checkSelfPermission 으로 안 됨)
+    // ─────────────────────────────────────────────────────────────────
+
+    fun hasPermission(): Boolean {
+        val appOps = context.getSystemService(Context.APP_OPS_SERVICE) as AppOpsManager
+        val mode = appOps.checkOpNoThrow(
+            AppOpsManager.OPSTR_GET_USAGE_STATS,
+            Process.myUid(),
+            context.packageName
+        )
+        return mode == AppOpsManager.MODE_ALLOWED
+    }
+
+    // ─────────────────────────────────────────────────────────────────
+    // 분석 진입점
+    // ─────────────────────────────────────────────────────────────────
+
+    suspend fun analyze(): AppUsageSummary = withContext(Dispatchers.IO) {
+
+        if (!hasPermission()) {
+            Log.w(TAG, "PACKAGE_USAGE_STATS 권한 없음 — 설정에서 허용 필요")
+            return@withContext AppUsageSummary(
+                topApps = emptyList(),
+                dailyAvgScreenTimeMin = 0,
+                dailyAvgLateNightMin  = 0,
+                longestSingleSessionMin = 0,
+                weeklyChangePct = 0f,
+                hasPermission = false
+            )
+        }
+
+        val usm = context.getSystemService(Context.USAGE_STATS_SERVICE) as UsageStatsManager
+        val pm  = context.packageManager
+
+        val now           = System.currentTimeMillis()
+        val oneWeekMs     = 7L * 24 * 60 * 60 * 1000
+        val thisWeekStart = now - oneWeekMs
+        val prevWeekStart = now - 2 * oneWeekMs
+
+        // ── 이번 주 / 지난 주 일별 통계 ──────────────────────────────
+        val thisWeekStats = usm.queryUsageStats(
+            UsageStatsManager.INTERVAL_DAILY, thisWeekStart, now
+        ) ?: emptyList()
+
+        val prevWeekStats = usm.queryUsageStats(
+            UsageStatsManager.INTERVAL_DAILY, prevWeekStart, thisWeekStart
+        ) ?: emptyList()
+
+        // ── 앱별 총 사용 시간 집계 (이번 주) ─────────────────────────
+        val appTotalMs = mutableMapOf<String, Long>()
+        thisWeekStats.forEach { stat ->
+            if (stat.totalTimeInForeground > 0) {
+                appTotalMs[stat.packageName] =
+                    (appTotalMs[stat.packageName] ?: 0L) + stat.totalTimeInForeground
+            }
+        }
+
+        val thisWeekTotalMs = appTotalMs.values.sum()
+        val prevWeekTotalMs = prevWeekStats.sumOf { it.totalTimeInForeground }
+
+        val weeklyChangePct = if (prevWeekTotalMs > 0) {
+            ((thisWeekTotalMs - prevWeekTotalMs).toFloat() / prevWeekTotalMs) * 100f
+        } else 0f
+
+        // ── 상위 앱 목록 (7일 합산 7분 이상 = 하루 평균 1분 이상) ────
+        val topApps = appTotalMs.entries
+            .filter { it.value > 7 * 60_000L }
+            .sortedByDescending { it.value }
+            .take(10)
+            .mapNotNull { (pkg, ms) ->
+                runCatching {
+                    val appInfo = pm.getApplicationInfo(pkg, 0)
+                    AppUsageEntry(
+                        packageName  = pkg,
+                        appName      = pm.getApplicationLabel(appInfo).toString(),
+                        totalTimeMin = ms / 60_000,
+                        category     = categorizeApp(appInfo, pkg)
+                    )
+                }.getOrNull()
+            }
+
+        // ── 야간 사용 시간 (이벤트 기반) ─────────────────────────────
+        val lateNightTotalMin = calcLateNightUsage(usm, thisWeekStart, now)
+
+        // ── 최장 단일 세션 ────────────────────────────────────────────
+        val longestMin = calcLongestSession(usm, thisWeekStart, now)
+
+        // ── 월 단위 수면·생활 리듬 (최근 30일) ───────────────────────
+        val rhythm = analyzeMonthlyRhythm(usm, now)
+
+        Log.d(TAG, "앱 사용 분석 완료 — 일평균:${thisWeekTotalMs / 7 / 60_000}분 " +
+                "야간:${lateNightTotalMin / 7}분/일 최장세션:${longestMin}분 / " +
+                "월간 야간사용:${rhythm.nightUsageDays}일 수면부족:${rhythm.sleepDeficientDays}일 " +
+                "리듬점수:${rhythm.rhythmScore} 붕괴:${rhythm.disrupted}")
+
+        AppUsageSummary(
+            topApps                = topApps,
+            dailyAvgScreenTimeMin  = (thisWeekTotalMs / 7) / 60_000,
+            dailyAvgLateNightMin   = lateNightTotalMin / 7,
+            longestSingleSessionMin = longestMin,
+            weeklyChangePct        = weeklyChangePct,
+            hasPermission          = true,
+            analyzedDays              = rhythm.analyzedDays,
+            nightUsageDaysPerMonth    = rhythm.nightUsageDays,
+            sleepDeficientDaysPerMonth = rhythm.sleepDeficientDays,
+            avgBedtimeProxyHour       = rhythm.avgBedtimeHour,
+            rhythmScore               = rhythm.rhythmScore,
+            rhythmDisrupted           = rhythm.disrupted
+        )
+    }
+
+    // ─────────────────────────────────────────────────────────────────
+    // 월 단위 수면·생활 리듬 분석 (최근 30일, 이벤트 기반)
+    //
+    //  · 야간 사용일      : 하루 00~06시 사용 ≥ 15분인 날
+    //  · 수면 부족 추정일 : 하루 01~05시(깊은 새벽) 사용 ≥ 10분인 날
+    //                      → 자야 할 시간에 깨어 있었음 = 수면 부족 신호
+    //  · 취침 추정 시각   : 매일 마지막 활동 시각의 평균
+    //  · 리듬 점수        : 야간 사용일 비율 + 취침 시각 들쭉날쭉(편차) 기반 0~100
+    //  · 리듬 붕괴        : 야간 사용일 10일↑ 또는 수면 부족 7일↑ 또는 리듬점수 40 미만
+    // ─────────────────────────────────────────────────────────────────
+
+    private data class RhythmResult(
+        val analyzedDays: Int,
+        val nightUsageDays: Int,
+        val sleepDeficientDays: Int,
+        val avgBedtimeHour: Float,
+        val rhythmScore: Int,
+        val disrupted: Boolean
+    )
+
+    private fun analyzeMonthlyRhythm(usm: UsageStatsManager, now: Long): RhythmResult {
+        val dayMs = 24L * 60 * 60 * 1000
+        val from = now - 30 * dayMs
+        val events = usm.queryEvents(from, now) ?: return RhythmResult(0, 0, 0, -1f, 100, false)
+
+        // 날짜키(yyyy-ddd) → [야간(00~06)분, 심야(01~05)분, 마지막 활동 시각(시.분 소수)]
+        val nightMinByDay = mutableMapOf<String, Long>()
+        val deepMinByDay  = mutableMapOf<String, Long>()
+        val lastActiveHourByDay = mutableMapOf<String, Float>()
+        val activeDays = mutableSetOf<String>()
+
+        var sessionStart = -1L
+        val event = UsageEvents.Event()
+        val cal = Calendar.getInstance()
+
+        fun dayKey(ts: Long): String {
+            cal.timeInMillis = ts
+            return "%04d-%03d".format(cal.get(Calendar.YEAR), cal.get(Calendar.DAY_OF_YEAR))
+        }
+
+        while (events.hasNextEvent()) {
+            events.getNextEvent(event)
+            when (event.eventType) {
+                UsageEvents.Event.ACTIVITY_RESUMED -> sessionStart = event.timeStamp
+                UsageEvents.Event.ACTIVITY_PAUSED -> {
+                    if (sessionStart > 0) {
+                        accumulateNight(sessionStart, event.timeStamp, cal, nightMinByDay, deepMinByDay)
+                        // 활동 기록 (취침 추정 = 그 날의 마지막 활동 시각)
+                        val key = dayKey(event.timeStamp)
+                        activeDays.add(key)
+                        cal.timeInMillis = event.timeStamp
+                        val hourFloat = cal.get(Calendar.HOUR_OF_DAY) + cal.get(Calendar.MINUTE) / 60f
+                        // 새벽 활동(0~6시)은 전날 밤 연장으로 보아 24+ 로 환산해 '늦은 취침'으로 처리
+                        val adjusted = if (cal.get(Calendar.HOUR_OF_DAY) < 6) hourFloat + 24f else hourFloat
+                        val prev = lastActiveHourByDay[key] ?: 0f
+                        if (adjusted > prev) lastActiveHourByDay[key] = adjusted
+                        sessionStart = -1L
+                    }
+                }
+            }
+        }
+
+        val analyzedDays = maxOf(activeDays.size, 1)
+        val nightUsageDays = nightMinByDay.count { it.value >= 15 * 60_000L }
+        val sleepDeficientDays = deepMinByDay.count { it.value >= 10 * 60_000L }
+
+        // 평균 취침 추정 시각 (24h 표기로 환산)
+        val bedtimes = lastActiveHourByDay.values.filter { it > 0f }
+        val avgBedtime = if (bedtimes.isNotEmpty()) {
+            val avg = bedtimes.average().toFloat()
+            if (avg >= 24f) avg - 24f else avg
+        } else -1f
+
+        // 취침 시각 편차 (들쭉날쭉할수록 리듬 불안정)
+        val bedtimeStd = if (bedtimes.size >= 2) {
+            val m = bedtimes.average()
+            kotlin.math.sqrt(bedtimes.map { (it - m) * (it - m) }.average()).toFloat()
+        } else 0f
+
+        // 리듬 점수: 야간사용일 비율↓ + 취침편차↓ 일수록 높음
+        val nightRatio = nightUsageDays.toFloat() / 30f                 // 0~1
+        val stdPenalty = (bedtimeStd / 3f).coerceIn(0f, 1f)            // 편차 3시간이면 최대
+        val rhythmScore = ((1f - nightRatio * 0.6f - stdPenalty * 0.4f) * 100f)
+            .toInt().coerceIn(0, 100)
+
+        val disrupted = nightUsageDays >= 10 || sleepDeficientDays >= 7 || rhythmScore < 40
+
+        return RhythmResult(
+            analyzedDays       = minOf(analyzedDays, 30),
+            nightUsageDays     = nightUsageDays,
+            sleepDeficientDays = sleepDeficientDays,
+            avgBedtimeHour     = avgBedtime,
+            rhythmScore        = rhythmScore,
+            disrupted          = disrupted
+        )
+    }
+
+    /** 한 세션(start~end)을 00~06시 / 01~05시 버킷에 분 단위로 누적 (시간 경계 분할) */
+    private fun accumulateNight(
+        start: Long, end: Long, cal: Calendar,
+        nightMinByDay: MutableMap<String, Long>,
+        deepMinByDay: MutableMap<String, Long>
+    ) {
+        // 세션을 10분 단위로 스캔하며 해당 시각이 야간/심야면 누적 (간단·견고)
+        val step = 60_000L // 1분
+        var t = start
+        while (t < end) {
+            cal.timeInMillis = t
+            val h = cal.get(Calendar.HOUR_OF_DAY)
+            val key = "%04d-%03d".format(cal.get(Calendar.YEAR), cal.get(Calendar.DAY_OF_YEAR))
+            if (h in 0..5) nightMinByDay[key] = (nightMinByDay[key] ?: 0L) + step
+            if (h in 1..4) deepMinByDay[key]  = (deepMinByDay[key] ?: 0L) + step
+            t += step
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────
+    // 앱 카테고리 분류
+    // ─────────────────────────────────────────────────────────────────
+
+    private fun categorizeApp(appInfo: ApplicationInfo, pkg: String): AppCategory {
+        // Android O 이상: ApplicationInfo.category 활용
+        val category = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            appInfo.category
+        } else -1
+
+        return when {
+            category == ApplicationInfo.CATEGORY_GAME         -> AppCategory.GAME
+            category == ApplicationInfo.CATEGORY_VIDEO        -> AppCategory.VIDEO
+            category == ApplicationInfo.CATEGORY_SOCIAL       -> AppCategory.SNS
+            category == ApplicationInfo.CATEGORY_PRODUCTIVITY -> AppCategory.PRODUCTIVITY
+            // 패키지명 키워드 fallback
+            SNS_PACKAGES.any { pkg.contains(it, ignoreCase = true) }   -> AppCategory.SNS
+            VIDEO_PACKAGES.any { pkg.contains(it, ignoreCase = true) }  -> AppCategory.VIDEO
+            GAME_PACKAGES.any { pkg.contains(it, ignoreCase = true) }   -> AppCategory.GAME
+            else                                                          -> AppCategory.OTHER
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────
+    // 야간(00~06시) 총 사용 시간 계산 (이벤트 기반, 분 단위 반환)
+    // ─────────────────────────────────────────────────────────────────
+
+    private fun calcLateNightUsage(usm: UsageStatsManager, from: Long, to: Long): Long {
+        val events = usm.queryEvents(from, to) ?: return 0L
+        var totalMs = 0L
+        var sessionStart = -1L
+        val event = UsageEvents.Event()
+
+        while (events.hasNextEvent()) {
+            events.getNextEvent(event)
+
+            val hour = Calendar.getInstance().run {
+                timeInMillis = event.timeStamp
+                get(Calendar.HOUR_OF_DAY)
+            }
+            val isLateNight = hour in 0..5
+
+            when (event.eventType) {
+                UsageEvents.Event.ACTIVITY_RESUMED -> {
+                    if (isLateNight) sessionStart = event.timeStamp
+                }
+                UsageEvents.Event.ACTIVITY_PAUSED  -> {
+                    if (isLateNight && sessionStart > 0) {
+                        totalMs += event.timeStamp - sessionStart
+                        sessionStart = -1L
+                    }
+                }
+            }
+        }
+
+        return totalMs / 60_000
+    }
+
+    // ─────────────────────────────────────────────────────────────────
+    // 최장 단일 연속 세션 계산 (이벤트 기반, 분 단위 반환)
+    // ─────────────────────────────────────────────────────────────────
+
+    private fun calcLongestSession(usm: UsageStatsManager, from: Long, to: Long): Long {
+        val events = usm.queryEvents(from, to) ?: return 0L
+        var longestMs = 0L
+        var sessionStart = -1L
+        val event = UsageEvents.Event()
+
+        while (events.hasNextEvent()) {
+            events.getNextEvent(event)
+
+            when (event.eventType) {
+                UsageEvents.Event.ACTIVITY_RESUMED -> {
+                    if (sessionStart < 0) sessionStart = event.timeStamp
+                }
+                UsageEvents.Event.ACTIVITY_PAUSED  -> {
+                    if (sessionStart > 0) {
+                        val duration = event.timeStamp - sessionStart
+                        if (duration > longestMs) longestMs = duration
+                        sessionStart = -1L
+                    }
+                }
+            }
+        }
+
+        return longestMs / 60_000
+    }
+
+    // ─────────────────────────────────────────────────────────────────
+    // 카테고리 분류용 패키지명 키워드
+    // ─────────────────────────────────────────────────────────────────
+
+    companion object {
+        private val SNS_PACKAGES = listOf(
+            "instagram", "twitter", "facebook", "tiktok",
+            "kakao.talk", "naver.band", "snapchat", "discord"
+        )
+        private val VIDEO_PACKAGES = listOf(
+            "youtube", "netflix", "twitch", "wavve",
+            "watcha", "tving", "vlive", "coupangplay"
+        )
+        private val GAME_PACKAGES = listOf(
+            "game", "supercell", "mihoyo", "garena",
+            "nexon", "netmarble", "ncsoft", "kakao.games"
+        )
+    }
+}

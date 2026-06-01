@@ -13,7 +13,7 @@ android {
         minSdk = 28
         targetSdk = 36
         versionCode = 1
-        versionName = "1.0.2"
+        versionName = "1.0.3"
 
     }
 
@@ -47,7 +47,7 @@ tasks.register("copyDatedDebugApk") {
         copy {
             from(layout.buildDirectory.file("outputs/apk/debug/app-debug.apk"))
             into(layout.buildDirectory.dir("outputs/apk/debug"))
-            rename { "Counseling_06_01_v1.0.2_debug.apk" }
+            rename { "Counseling_06_01_v1.0.3_debug.apk" }
         }
     }
 }
