@@ -167,6 +167,8 @@ fun ChatSettingsDialog(
     onToggleHealthContext: () -> Unit,
     includePhenotypeContext: Boolean,
     onTogglePhenotypeContext: () -> Unit,
+    includeGalleryAnalysisContext: Boolean,
+    onToggleGalleryAnalysisContext: () -> Unit,
     healthContextPeriod: HealthPeriod,
     onCycleHealthPeriod: () -> Unit,
     thinkingMode: ThinkingMode,
@@ -258,6 +260,13 @@ fun ChatSettingsDialog(
                 }
                 if (responseOpen) item {
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        SettingsActionButton(
+                            onClick = onToggleGalleryAnalysisContext,
+                            modifier = Modifier.weight(1f),
+                            selected = includeGalleryAnalysisContext,
+                        ) {
+                            Text(if (includeGalleryAnalysisContext) "Gallery 포함" else "Gallery 제외")
+                        }
                         SettingsActionButton(onClick = onCycleHealthPeriod, modifier = Modifier.weight(1f)) {
                             Text("기간 ${healthContextPeriod.label}")
                         }

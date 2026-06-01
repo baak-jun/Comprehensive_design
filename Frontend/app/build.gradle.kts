@@ -13,7 +13,7 @@ android {
         minSdk = 28
         targetSdk = 36
         versionCode = 1
-        versionName = "1.0.0"
+        versionName = "1.0.2"
 
     }
 
@@ -47,7 +47,7 @@ tasks.register("copyDatedDebugApk") {
         copy {
             from(layout.buildDirectory.file("outputs/apk/debug/app-debug.apk"))
             into(layout.buildDirectory.dir("outputs/apk/debug"))
-            rename { "Counseling_05_30_v1.0.0_debug.apk" }
+            rename { "Counseling_06_01_v1.0.2_debug.apk" }
         }
     }
 }
@@ -70,6 +70,12 @@ dependencies {
     implementation(libs.androidx.health.connect)
     implementation(libs.litertlm.android)
     implementation(libs.mediapipe.tasks.genai)
+    implementation(libs.androidx.exifinterface)
+    implementation(libs.gson)
+    implementation(libs.kotlinx.coroutines.play.services)
+    implementation(libs.mlkit.image.labeling)
+    implementation(libs.mlkit.objects)
+    implementation(libs.mlkit.face.detection)
 
     debugImplementation(libs.androidx.ui.tooling)
     debugImplementation(libs.androidx.ui.test.manifest)
