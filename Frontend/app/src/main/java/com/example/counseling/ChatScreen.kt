@@ -97,6 +97,8 @@ fun ChatScreen(
     var input by remember { mutableStateOf("") }
     var systemPrompt by remember { mutableStateOf(LiteRtLmCounselingEngine.defaultSystemInstruction) }
     var showSystemPrompt by remember { mutableStateOf(false) }
+    var showPromptOverview by remember { mutableStateOf(false) }
+    var promptPreview by remember { mutableStateOf<PromptPreviewState?>(null) }
     var showMemories by remember { mutableStateOf(false) }
     var showChatMenu by remember { mutableStateOf(false) }
     var showChatSettings by remember { mutableStateOf(false) }
@@ -105,6 +107,7 @@ fun ChatScreen(
     var thinkingMode by remember { mutableStateOf(ThinkingMode.Auto) }
     var includeHealthContext by remember { mutableStateOf(false) }
     var includePhenotypeContext by remember { mutableStateOf(false) }
+    var includeGalleryAnalysisContext by remember { mutableStateOf(false) }
     var healthContextPeriod by remember { mutableStateOf(HealthPeriod.Week) }
     var directAttachmentMode by remember { mutableStateOf(true) }
     var chatFontSize by remember { mutableStateOf(ChatFontSize.Normal) }
@@ -125,6 +128,42 @@ fun ChatScreen(
             status = liteRtEngine.importAndLoadModel(uri, buildSystemPromptWithMemories(systemPrompt, importantMemories))
             isLoadingModel = false
             messages += ChatMessage(ChatRole.Assistant, status.message)
+        }
+    }
+
+    fun loadPromptPreview() {
+        promptPreview = PromptPreviewState(
+            healthContext = "불러오는 중...",
+            phenotypeContext = "불러오는 중...",
+            galleryContext = "불러오는 중...",
+            memoryContext = "불러오는 중...",
+        )
+        scope.launch {
+            val healthContext = if (includeHealthContext) {
+                readHealthSummary(context, healthContextPeriod).toPromptContext()
+            } else {
+                null
+            }
+            val phenotypeContext = if (includePhenotypeContext) {
+                readPhenotypePromptContext(context).contextText
+            } else {
+                null
+            }
+            val galleryContext = if (includeGalleryAnalysisContext) {
+                readGalleryAnalysisPromptContext(context).contextText
+            } else {
+                null
+            }
+            val memoryContext = buildSystemPromptWithMemories(systemPrompt, importantMemories)
+                .removePrefix(systemPrompt)
+                .trim()
+                .ifBlank { "사용자 추가 기억이 없습니다. 기본 기억은 시스템 지침에 함께 적용됩니다." }
+            promptPreview = PromptPreviewState(
+                healthContext = healthContext,
+                phenotypeContext = phenotypeContext,
+                galleryContext = galleryContext,
+                memoryContext = memoryContext,
+            )
         }
     }
 
@@ -284,6 +323,26 @@ fun ChatScreen(
         },
     )
 
+    if (showPromptOverview) {
+        PromptOverviewDialog(
+            systemPrompt = systemPrompt,
+            preview = promptPreview,
+            onApply = { updatedPrompt ->
+                systemPrompt = updatedPrompt
+                showPromptOverview = false
+                scope.launch {
+                    status = liteRtEngine.updateSystemInstruction(
+                        buildSystemPromptWithMemories(systemPrompt, importantMemories),
+                    )
+                    sessionStore.saveLastSession(messages.toList(), systemPrompt, importantMemories.toList(), currentSessionId)
+                    memoryStore.reindexSession(messages.toList(), currentSessionId)
+                    sessionSummaries = sessionStore.listSessions()
+                }
+            },
+            onDismiss = { showPromptOverview = false },
+        )
+    }
+
     if (showSystemPrompt) {
         AlertDialog(
             onDismissRequest = { showSystemPrompt = false },
@@ -356,6 +415,8 @@ fun ChatScreen(
             onToggleHealthContext = { includeHealthContext = !includeHealthContext },
             includePhenotypeContext = includePhenotypeContext,
             onTogglePhenotypeContext = { includePhenotypeContext = !includePhenotypeContext },
+            includeGalleryAnalysisContext = includeGalleryAnalysisContext,
+            onToggleGalleryAnalysisContext = { includeGalleryAnalysisContext = !includeGalleryAnalysisContext },
             healthContextPeriod = healthContextPeriod,
             onCycleHealthPeriod = { healthContextPeriod = healthContextPeriod.next() },
             thinkingMode = thinkingMode,
@@ -365,7 +426,10 @@ fun ChatScreen(
             chatFontSize = chatFontSize,
             onChatFontSizeChange = { chatFontSize = it },
             onLoadModel = { modelPicker.launch(arrayOf("*/*")) },
-            onShowSystemPrompt = { showSystemPrompt = true },
+            onShowSystemPrompt = {
+                showPromptOverview = true
+                loadPromptPreview()
+            },
             onShowMemories = { showMemories = true },
             onNewSession = {
                 showChatSettings = false
@@ -720,6 +784,16 @@ fun ChatScreen(
                     } else {
                         null
                     }
+                    val galleryAnalysisContext = if (includeGalleryAnalysisContext) {
+                        status = EngineStatus(status.isModelLoaded, "Gallery 분석 맥락을 읽고 있습니다...")
+                        val result = readGalleryAnalysisPromptContext(context)
+                        if (result.contextText == null) {
+                            status = EngineStatus(status.isModelLoaded, result.message)
+                        }
+                        result.contextText
+                    } else {
+                        null
+                    }
                     val relevantMemories = memoryStore
                         .searchRelevant(text, sessionId = currentSessionId)
                         .filterNot { it.role == ChatRole.User && it.content == userMessage.content }
@@ -728,6 +802,7 @@ fun ChatScreen(
                         .withMemoryContext(importantMemories, relevantMemories)
                         .withHealthContext(healthContext)
                         .withPhenotypeContext(phenotypeContext)
+                        .withGalleryAnalysisContext(galleryAnalysisContext)
                         .withThinkingInstruction(useThinking)
                         .toList()
                     liteRtEngine.setDirectAttachmentMode(directAttachmentMode)
