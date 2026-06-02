@@ -4,6 +4,10 @@
 
 The voice emotion model was integrated as a PyTorch Lite `.ptl` asset and included in the debug APK.
 
+Status update:
+
+This PTL path was later replaced by a static float16 TFLite/LiteRT artifact because the PTL model was too large and could crash after analysis on-device. Keep this document as the PTL trial record, not the current production path.
+
 Model source:
 
 ```text
@@ -201,7 +205,6 @@ Happy, Sad, Angry, Fearful, Neutral
 
 ## Recommended Next Steps
 
+- Use the TFLite/LiteRT path documented in `Analysis/Voice/README_conversion.md`.
 - Verify inference on a device with a short recorded WAV.
-- Confirm the `.ptl` input shape and output label order from the export script.
-- Consider quantization or a smaller export if APK/device storage size becomes a problem.
 - Rename the dated debug APK task from `06_01` to `06_02` if the filename should match the current build date.

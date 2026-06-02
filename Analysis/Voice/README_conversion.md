@@ -32,19 +32,45 @@ Analysis/Voice/converted/voice_emotion.onnx
 Analysis/Voice/converted/voice_emotion_metadata.json
 ```
 
-## Optional TFLite/LiteRT Conversion
+## TFLite/LiteRT Conversion
 
-Use Python 3.11 or 3.12:
+The conversion was completed in project-local Python 3.13 virtual environments:
 
-```powershell
-cd C:\Users\baak_jun\Desktop\Comprehensive_design
-py -3.11 -m venv .venv_voice_convert
-.\.venv_voice_convert\Scripts\activate
-python -m pip install tensorflow onnx onnx2tf
-onnx2tf -i Analysis/Voice/converted/voice_emotion.onnx -o Analysis/Voice/converted/tflite_work
+```text
+.venv_voice_onnx
+.venv_voice_tflite
 ```
 
-If Wav2Vec2 ops fail during TFLite conversion, keep the ONNX artifact and use ONNX Runtime Mobile in the app.
+Export static ONNX first:
+
+```powershell
+.\.venv_voice_onnx\Scripts\python.exe .\Analysis\Voice\convert_voice_emotion_model.py --static-shape
+```
+
+Then convert the static ONNX to TFLite:
+
+```powershell
+.\.venv_voice_tflite\Scripts\onnx2tf.exe -i .\Analysis\Voice\converted\voice_emotion_static.onnx -o .\Analysis\Voice\converted\tflite_work_static2 -n
+```
+
+Generated files:
+
+```text
+Analysis/Voice/converted/tflite_work_static2/voice_emotion_static_float16.tflite
+Analysis/Voice/converted/tflite_work_static2/voice_emotion_static_float32.tflite
+```
+
+The app uses the float16 model:
+
+```text
+Frontend/app/src/main/assets/models/voice_emotion.tflite
+```
+
+The float16 model is copied from:
+
+```text
+Analysis/Voice/converted/tflite_work_static2/voice_emotion_static_float16.tflite
+```
 
 ## App Assumptions
 
@@ -56,9 +82,26 @@ shape: [1, samples]
 sample rate: 16000 Hz
 ```
 
+For the current static TFLite model:
+
+```text
+shape: [1, 192000]
+duration: 12 seconds at 16kHz
+```
+
+The Android app pads shorter recordings with zeros and truncates longer recordings to 12 seconds before inference.
+
 Output:
 
 ```text
 logits shape: [1, 5]
 labels: Happy, Sad, Angry, Fearful, Neutral
+```
+
+## Current Artifact Sizes
+
+```text
+voice_emotion_static_float16.tflite: ~602.5 MB
+voice_emotion_static_float32.tflite: ~1,204.6 MB
+debug APK with float16 model: ~831.3 MB
 ```

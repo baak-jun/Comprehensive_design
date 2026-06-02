@@ -66,7 +66,7 @@ import com.example.counseling.llm.ChatMessage
 import com.example.counseling.llm.ChatRole
 import com.example.counseling.llm.EngineStatus
 import com.example.counseling.llm.LiteRtLmCounselingEngine
-import com.example.counseling.voiceemotion.PyTorchVoiceEmotionAnalyzer
+import com.example.counseling.voiceemotion.LiteRtVoiceEmotionAnalyzer
 import kotlinx.coroutines.launch
 import java.io.File
 import java.util.Locale
@@ -82,7 +82,7 @@ fun ChatScreen(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val liteRtEngine = remember { LiteRtLmCounselingEngine(context.applicationContext) }
-    val voiceEmotionAnalyzer = remember { PyTorchVoiceEmotionAnalyzer(context.applicationContext) }
+    val voiceEmotionAnalyzer = remember { LiteRtVoiceEmotionAnalyzer(context.applicationContext) }
     val sessionStore = remember { ChatSessionStore(context.applicationContext) }
     val memoryStore = remember { ChatMemoryStore(context.applicationContext) }
     val imeBottomPadding = 0.dp
@@ -840,7 +840,7 @@ fun ChatScreen(
 }
 
 private suspend fun ChatMessage.withVoiceEmotionContext(
-    voiceEmotionAnalyzer: PyTorchVoiceEmotionAnalyzer,
+    voiceEmotionAnalyzer: LiteRtVoiceEmotionAnalyzer,
     updateStatus: (String) -> Unit,
 ): ChatMessage {
     val audio = audioPath?.let { File(it) }?.takeIf { it.exists() && it.length() > 44L }

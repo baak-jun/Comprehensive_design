@@ -3,12 +3,12 @@ package com.example.counseling.voiceemotion
 import android.content.Context
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import org.pytorch.IValue
-import org.pytorch.LiteModuleLoader
-import org.pytorch.Module
-import org.pytorch.Tensor
+import org.tensorflow.lite.Interpreter
 import java.io.File
+import java.io.FileInputStream
 import java.io.RandomAccessFile
+import java.nio.MappedByteBuffer
+import java.nio.channels.FileChannel
 import kotlin.math.min
 
 enum class VoiceEmotion(val displayName: String) {
@@ -37,24 +37,23 @@ data class VoiceEmotionResult(
     }
 }
 
-class PyTorchVoiceEmotionAnalyzer(
+class LiteRtVoiceEmotionAnalyzer(
     private val context: Context,
-    private val modelFileName: String = "wav2vec2_korean_emotion.ptl",
+    private val modelFileName: String = "voice_emotion.tflite",
     private val maxSamples: Int = 16000 * 12,
 ) : AutoCloseable {
-    private var module: Module? = null
+    private var interpreter: Interpreter? = null
 
     suspend fun analyze(audioFile: File): VoiceEmotionResult? = withContext(Dispatchers.Default) {
-        val model = loadModuleOrNull() ?: return@withContext null
-        val waveform = readWavAsMonoFloat32(audioFile, maxSamples)
+        val model = loadInterpreterOrNull() ?: return@withContext null
+        val waveform = readWavAsFixedMonoFloat32(audioFile, maxSamples)
         if (waveform.isEmpty()) return@withContext null
 
-        val input = Tensor.fromBlob(waveform, longArrayOf(1L, waveform.size.toLong()))
-        val output = model.forward(IValue.from(input)).toTensor()
-        val logits = output.dataAsFloatArray.take(VoiceEmotion.entries.size).toFloatArray()
-        if (logits.size != VoiceEmotion.entries.size) return@withContext null
+        val input = arrayOf(waveform)
+        val output = Array(1) { FloatArray(VoiceEmotion.entries.size) }
+        model.run(input, output)
 
-        val probabilities = softmax(logits)
+        val probabilities = softmax(output[0])
         val bestIndex = probabilities.indices.maxByOrNull { probabilities[it] } ?: return@withContext null
         VoiceEmotionResult(
             emotion = VoiceEmotion.entries[bestIndex],
@@ -100,35 +99,37 @@ class PyTorchVoiceEmotionAnalyzer(
     }
 
     override fun close() {
-        module?.destroy()
-        module = null
+        interpreter?.close()
+        interpreter = null
     }
 
-    private fun loadModuleOrNull(): Module? {
-        module?.let { return it }
-        val path = runCatching { resolveModelPath() }.getOrNull() ?: return null
-        return LiteModuleLoader.load(path).also { module = it }
+    private fun loadInterpreterOrNull(): Interpreter? {
+        interpreter?.let { return it }
+        val buffer = runCatching { mapModelFile() }.getOrNull() ?: return null
+        return Interpreter(buffer).also { interpreter = it }
     }
 
-    private fun resolveModelPath(): String {
+    private fun mapModelFile(): MappedByteBuffer {
         val externalModel = File(File(context.getExternalFilesDir(null), "models"), modelFileName)
         if (externalModel.exists() && externalModel.isFile && externalModel.canRead()) {
-            return externalModel.absolutePath
-        }
-
-        val target = File(context.filesDir, modelFileName)
-        if (!target.exists() || target.length() == 0L) {
-            context.assets.open("models/$modelFileName").use { input ->
-                target.outputStream().use { output ->
-                    input.copyTo(output, bufferSize = 1024 * 1024)
-                }
+            return FileInputStream(externalModel).channel.use { channel ->
+                channel.map(FileChannel.MapMode.READ_ONLY, 0L, channel.size())
             }
         }
-        return target.absolutePath
+
+        context.assets.openFd("models/$modelFileName").use { descriptor ->
+            FileInputStream(descriptor.fileDescriptor).channel.use { channel ->
+                return channel.map(
+                    FileChannel.MapMode.READ_ONLY,
+                    descriptor.startOffset,
+                    descriptor.declaredLength,
+                )
+            }
+        }
     }
 }
 
-private fun readWavAsMonoFloat32(file: File, maxSamples: Int): FloatArray {
+private fun readWavAsFixedMonoFloat32(file: File, maxSamples: Int): FloatArray {
     RandomAccessFile(file, "r").use { wav ->
         require(wav.length() > 44L) { "WAV 파일이 비어 있습니다." }
         val riff = ByteArray(4)
@@ -162,7 +163,7 @@ private fun readWavAsMonoFloat32(file: File, maxSamples: Int): FloatArray {
         wav.seek(dataOffset)
         val frameCount = dataSize / (2 * channels)
         val sampleCount = min(frameCount, maxSamples)
-        val samples = FloatArray(sampleCount)
+        val samples = FloatArray(maxSamples)
         for (i in 0 until sampleCount) {
             var mono = 0
             repeat(channels) {

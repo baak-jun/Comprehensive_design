@@ -4,6 +4,7 @@ LLMmodels/
 Analysis/Voice/voice_emotion/final_korean_emotion_model/
 Analysis/Voice/*.ptl
 Frontend/app/src/main/assets/models/*.ptl
+Frontend/app/src/main/assets/models/*.tflite
 
 # Python local caches
 __pycache__/
